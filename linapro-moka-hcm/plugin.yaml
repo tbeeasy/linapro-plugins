@@ -1,0 +1,23 @@
+id: linapro-moka-hcm
+name: Moka HCM 人事系统客户端
+version: v0.1.0
+type: source
+distribution: managed
+scope_nature: tenant_aware
+supports_multi_tenant: true
+default_install_mode: tenant_scoped
+description: |
+  提供 Moka HCM OpenAPI 客户端能力，供其他插件复用。
+  - HCMAuth：Basic Auth header + MD5withRSA 请求签名（适用于报表等 HCM 接口）
+  本插件不注册任何后台任务，仅提供 HCM 客户端基础设施。
+  后续 HCM 接口（组织架构、员工档案、薪酬等）将陆续添加至本插件。
+author: linapro
+license: Apache-2.0
+i18n:
+  enabled: true
+  default: zh-CN
+  locales:
+    - locale: en-US
+      nativeName: English
+    - locale: zh-CN
+      nativeName: 简体中文
