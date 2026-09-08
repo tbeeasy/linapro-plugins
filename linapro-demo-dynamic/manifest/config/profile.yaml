@@ -1,5 +1,0 @@
-# Packaged manifest profile read through manifest.get for the host-call demo.
-profile:
-  name: demo-dynamic-profile
-  tier: sample
-  owner: linapro

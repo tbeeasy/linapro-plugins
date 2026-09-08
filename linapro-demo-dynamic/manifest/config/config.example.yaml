@@ -1,4 +1,0 @@
-# Runtime configuration template for linapro-demo-dynamic.
-demo:
-  greeting: Hello from dynamic plugin
-  featureEnabled: true
