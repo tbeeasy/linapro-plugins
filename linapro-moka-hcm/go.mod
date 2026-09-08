@@ -3,7 +3,7 @@ module lina-plugin-linapro-moka-hcm
 go 1.25.0
 
 require (
-	github.com/gogf/gf/v2 v2.10.1
+	github.com/gogf/gf/v2 v2.10.2
 	lina-core v0.0.0
 )
 
