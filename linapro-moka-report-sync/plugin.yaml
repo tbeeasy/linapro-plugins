@@ -1,0 +1,23 @@
+id: linapro-moka-report-sync
+name: Moka 报表同步
+version: v0.1.0
+type: source
+distribution: managed
+scope_nature: tenant_aware
+supports_multi_tenant: true
+default_install_mode: tenant_scoped
+description: |
+  定时把 Moka 报表中心数据同步到飞书多维表格（Bitable）。
+  - 通过 Moka getReportData 接口按 reportId 拉取报表
+  - 工号主键 + 交集列完整性门闩写入 Bitable（新增 / 重写 / 冻结）
+  依赖 linapro-moka-hcm 插件提供 Moka API 客户端能力。
+author: linapro
+license: Apache-2.0
+i18n:
+  enabled: true
+  default: zh-CN
+  locales:
+    - locale: en-US
+      nativeName: English
+    - locale: zh-CN
+      nativeName: 简体中文
