@@ -1,0 +1,4 @@
+{
+  "plugin.linapro-moka-recruit.name": "Moka Recruitment API Client",
+  "plugin.linapro-moka-recruit.description": "Provides a Moka recruiting system OpenAPI client with both BasicAuth and OAuth2Auth, plus recruiting-domain endpoint clients. Reusable by other plugins; this plugin itself registers no background tasks."
+}

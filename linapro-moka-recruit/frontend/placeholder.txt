@@ -1,0 +1,2 @@
+This directory is intentionally empty. The placeholder file ensures the frontend
+directory is included in the Go embed filesystem required by plugin_embed.go.

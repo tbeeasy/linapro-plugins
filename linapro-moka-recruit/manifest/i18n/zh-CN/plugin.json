@@ -1,0 +1,4 @@
+{
+  "plugin.linapro-moka-recruit.name": "Moka 招聘 API 客户端",
+  "plugin.linapro-moka-recruit.description": "提供 Moka 招聘系统 OpenAPI 客户端能力：BasicAuth 与 OAuth2Auth 双鉴权，以及招聘域接口客户端。供其他插件复用，本插件自身不注册后台任务。"
+}

@@ -1,0 +1,24 @@
+id: linapro-moka-recruit
+name: Moka 招聘 API 客户端
+version: v0.1.0
+type: source
+distribution: managed
+scope_nature: tenant_aware
+supports_multi_tenant: true
+default_install_mode: tenant_scoped
+description: |
+  提供 Moka 招聘系统 OpenAPI 客户端能力，供其他插件复用。
+  - BasicAuth：Authorization: Basic base64(apiKey:)（招聘系统主力鉴权方式）
+  - OAuth2Auth：client_credentials Bearer token + 自动续期
+  招聘系统 API 路径前缀：/api-platform/v1/、/api-platform/v2/、/api-platform/v3/
+  本插件不注册任何后台任务，仅提供客户端基础设施。
+author: linapro
+license: Apache-2.0
+i18n:
+  enabled: true
+  default: zh-CN
+  locales:
+    - locale: en-US
+      nativeName: English
+    - locale: zh-CN
+      nativeName: 简体中文
