@@ -4,14 +4,13 @@ package backend
 import (
 	"context"
 	"fmt"
+	"lina-core/pkg/logger"
 
 	mokareportsync "lina-plugin-linapro-moka-report-sync"
 	"lina-plugin-linapro-moka-report-sync/backend/internal/config"
 	"lina-plugin-linapro-moka-report-sync/backend/internal/service"
 
 	"lina-core/pkg/plugin/pluginhost"
-
-	"github.com/gogf/gf/v2/os/glog"
 )
 
 const (
@@ -50,11 +49,11 @@ func registerJobs(ctx context.Context, registrar pluginhost.JobsRegistrar) error
 		"定时把 Moka 报表数据同步到飞书多维表格",
 		func(jobCtx context.Context) error {
 			if _, err := service.NewRunner(registrar.Services()).RunOnce(jobCtx); err != nil {
-				glog.Errorf(jobCtx, "Moka报表同步失败: %+v", err)
+				logger.Errorf(jobCtx, "Moka报表同步失败: %+v", err)
 				return err
 			}
 
-			glog.Info(jobCtx, "Moka报表同步完成")
+			logger.Info(jobCtx, "Moka报表同步完成")
 
 			return nil
 		},

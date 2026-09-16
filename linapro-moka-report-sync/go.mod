@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/gogf/gf/v2 v2.10.2
+	github.com/larksuite/oapi-sdk-go/v3 v3.11.0
 	lina-core v0.0.0
 	lina-plugin-linapro-employee-core v0.0.0
 	lina-plugin-linapro-moka-hcm v0.0.0
@@ -23,7 +24,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grokify/html-strip-tags-go v0.1.0 // indirect
-	github.com/larksuite/oapi-sdk-go/v3 v3.11.0 // indirect
 	github.com/magiconair/properties v1.8.10 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect

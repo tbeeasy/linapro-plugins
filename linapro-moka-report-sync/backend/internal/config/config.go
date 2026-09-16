@@ -40,9 +40,10 @@ const (
 )
 
 const (
-	defaultTenantID    = 1
-	defaultIntervalMin = 5
-	defaultUniqueField = "工号"
+	defaultTenantID     = 1
+	defaultIntervalMin  = 5
+	defaultUniqueField  = "工号"
+	defaultKeySeparator = "-"
 )
 
 // ReportSource 标识一个映射使用哪个 Moka API 后端。
@@ -53,15 +54,31 @@ const (
 	SourceRecruit ReportSource = "recruit" // OAuth2 Bearer 令牌
 )
 
+// DerivedColumn 声明一条列派生规则：从一或多个源列按指定 kind 生成目标列。
+// kind 从封闭注册表解析（date / split / regex）。
+type DerivedColumn struct {
+	Kind    string            `json:"kind"`
+	Sources []string          `json:"sources"`
+	Targets map[string]string `json:"targets"` // 目标列名 → kind 相关参数（如 layout）
+	// split/regex 的参数直接内联到 map；date 用 Targets 的键作列名、值作 layout。
+	By      string `json:"by,omitempty"`      // split: 分隔符
+	Pattern string `json:"pattern,omitempty"` // regex: 正则表达式
+}
+
 // ReportMapping 把一个 Moka 报表绑定到一张飞书多维表格。
 type ReportMapping struct {
-	ReportID    int64        `json:"reportId"`
-	AppToken    string       `json:"appToken"`
-	TableID     string       `json:"tableId"`
-	UniqueField string       `json:"uniqueField"`
-	Remark      string       `json:"remark"`
-	Enable      bool         `json:"enable"`
-	Source      ReportSource `json:"source"` // "hcm"（默认）或 "recruit"
+	ReportID     int64        `json:"reportId"`
+	AppToken     string       `json:"appToken"`
+	TableID      string       `json:"tableId"`
+	UniqueFields []string     `json:"uniqueFields"`
+	KeySeparator string       `json:"keySeparator"`
+	Remark       string       `json:"remark"`
+	Enable       bool         `json:"enable"`
+	Source       ReportSource `json:"source"` // "hcm"（默认）或 "recruit"
+	// PersonFieldSources 声明「Bitable 人员字段名 → Moka 报表工号列名」的映射。
+	PersonFieldSources map[string]string `json:"personFieldSources,omitempty"`
+	// DerivedColumns 列派生规则，在 Plan 前执行。
+	DerivedColumns []DerivedColumn `json:"derivedColumns,omitempty"`
 }
 
 // Config 是单次同步周期解析后的插件配置。
@@ -99,11 +116,11 @@ func IntervalMinutes(ctx context.Context, services capability.Services) int {
 // Load 解析完整配置。缺少必需凭据时返回错误，以便调用方记录日志并跳过本轮同步。
 func Load(ctx context.Context, services capability.Services) (*Config, error) {
 	if services == nil {
-		return nil, gerror.New("moka-report-sync: host services unavailable")
+		return nil, gerror.New("linapro-moka-report-sync: 宿主机服务不可用")
 	}
 	hc := services.HostConfig()
 	if hc == nil {
-		return nil, gerror.New("moka-report-sync: host config capability unavailable")
+		return nil, gerror.New("linapro-moka-report-sync: 宿主机配置能力不可用")
 	}
 
 	apiKey, _ := hc.String(ctx, keyMokaAPIKey, "")
@@ -121,7 +138,7 @@ func Load(ctx context.Context, services capability.Services) (*Config, error) {
 	recruitBase, _ := hc.String(ctx, keyRecruitBaseURL, "")
 
 	if apiKey == "" || entCode == "" || pemKey == "" {
-		return nil, gerror.New("moka-report-sync: incomplete Moka HCM credentials (apiKey/entCode/rsaPrivateKey)")
+		return nil, gerror.New("linapro-moka-report-sync: Moka HCM 凭据不完整(apiKey/entCode/rsaPrivateKey)")
 	}
 
 	// apiCodes 以 map 形式配置在 moka.apiCodes 下；每个 key 是一个接口名
@@ -133,7 +150,7 @@ func Load(ctx context.Context, services capability.Services) (*Config, error) {
 		apiCodes = apiCodesVar.MapStrStr()
 	}
 	if larkAppId == "" || larkAppKey == "" {
-		return nil, gerror.New("moka-report-sync: incomplete lark credentials (appId/appSecret)")
+		return nil, gerror.New("linapro-moka-report-sync: 飞书凭据不完整(appId/appSecret)")
 	}
 	priv, err := hcm.ParsePrivateKey(pemKey)
 	if err != nil {
@@ -170,6 +187,22 @@ func Load(ctx context.Context, services capability.Services) (*Config, error) {
 	}, nil
 }
 
+// applyMappingDefaults 对单条映射做缺省归一：
+//   - uniqueFields 空 → ["工号"]
+//   - keySeparator 空 → defaultKeySeparator
+//   - source 空 → SourceHCM
+func applyMappingDefaults(m *ReportMapping) {
+	if len(m.UniqueFields) == 0 {
+		m.UniqueFields = []string{defaultUniqueField}
+	}
+	if m.KeySeparator == "" {
+		m.KeySeparator = defaultKeySeparator
+	}
+	if m.Source == "" {
+		m.Source = SourceHCM
+	}
+}
+
 func loadMappings(ctx context.Context, hc hostconfigcap.Service, tenantID int) ([]ReportMapping, error) {
 	sc := hc.SysConfig()
 	if sc == nil {
@@ -187,15 +220,10 @@ func loadMappings(ctx context.Context, hc hostconfigcap.Service, tenantID int) (
 
 	var mappings []ReportMapping
 	if err := json.Unmarshal([]byte(raw), &mappings); err != nil {
-		return nil, gerror.Wrap(err, "moka-report-sync: decode report mappings JSON")
+		return nil, gerror.Wrap(err, "linapro-moka-report-sync: 解析报表映射 JSON 失败")
 	}
 	for i := range mappings {
-		if mappings[i].UniqueField == "" {
-			mappings[i].UniqueField = defaultUniqueField
-		}
-		if mappings[i].Source == "" {
-			mappings[i].Source = SourceHCM
-		}
+		applyMappingDefaults(&mappings[i])
 	}
 	return mappings, nil
 }

@@ -12,9 +12,14 @@ func fieldSet(cols ...string) map[string]struct{} {
 	return m
 }
 
+// key1 构造单列 KeySpec，等价于原 uniqueField。
+func key1(field string) KeySpec {
+	return KeySpec{Fields: []string{field}, Sep: ""}
+}
+
 func TestPlan_CreateWhenAbsent(t *testing.T) {
 	in := PlanInput{
-		UniqueField: "姓名",
+		Key:         key1("姓名"),
 		ReportCols:  []string{"姓名", "性别", "民族"},
 		TableFields: fieldSet("姓名", "性别", "民族"),
 		Rows: []Row{
@@ -33,7 +38,7 @@ func TestPlan_CreateWhenAbsent(t *testing.T) {
 
 func TestPlan_RewriteWhenIntersectionColumnEmpty(t *testing.T) {
 	in := PlanInput{
-		UniqueField: "姓名",
+		Key:         key1("姓名"),
 		ReportCols:  []string{"姓名", "性别", "民族"},
 		TableFields: fieldSet("姓名", "性别", "民族"),
 		Rows: []Row{
@@ -55,7 +60,7 @@ func TestPlan_RewriteWhenIntersectionColumnEmpty(t *testing.T) {
 
 func TestPlan_FreezeWhenAllIntersectionColumnsFilled(t *testing.T) {
 	in := PlanInput{
-		UniqueField: "姓名",
+		Key:         key1("姓名"),
 		ReportCols:  []string{"姓名", "性别", "民族"},
 		TableFields: fieldSet("姓名", "性别", "民族"),
 		Rows: []Row{
@@ -73,7 +78,7 @@ func TestPlan_FreezeWhenAllIntersectionColumnsFilled(t *testing.T) {
 
 func TestPlan_IgnoresTableOnlyColumns(t *testing.T) {
 	in := PlanInput{
-		UniqueField: "姓名",
+		Key:         key1("姓名"),
 		ReportCols:  []string{"姓名", "性别"},
 		TableFields: fieldSet("姓名", "性别", "备注"),
 		Rows: []Row{
@@ -96,7 +101,7 @@ func TestPlan_IgnoresTableOnlyColumns(t *testing.T) {
 
 func TestPlan_SkipsRowsWithoutName(t *testing.T) {
 	in := PlanInput{
-		UniqueField: "姓名",
+		Key:         key1("姓名"),
 		ReportCols:  []string{"姓名", "性别"},
 		TableFields: fieldSet("姓名", "性别"),
 		Rows: []Row{
@@ -112,7 +117,7 @@ func TestPlan_SkipsRowsWithoutName(t *testing.T) {
 
 func TestPlan_OnlyWritesIntersectionColumns(t *testing.T) {
 	in := PlanInput{
-		UniqueField: "姓名",
+		Key:         key1("姓名"),
 		ReportCols:  []string{"姓名", "性别", "内部编码"},
 		TableFields: fieldSet("姓名", "性别"),
 		Rows: []Row{
@@ -162,5 +167,96 @@ func TestStringify_NumberStaysInteger(t *testing.T) {
 func TestStringify_RichTextSegments(t *testing.T) {
 	if got := stringify([]string{"第一段", "-", "第二段"}); got != "第一段第二段" {
 		t.Fatalf("expected per-segment normalize then join, got %q", got)
+	}
+}
+
+// TestPlan_DateNormalizedFreeze 复现「日期列反复更新」缺陷并锁定修复：
+// Bitable 回读值为写侧编码的毫秒字符串（如 "1759680000000"），而 Moka 侧是原始日期文本
+// （如 "2025-10-06"）。若 Moka 侧保留文本，Plan 会把它与毫秒字符串比较判为差异而每轮重写；
+// 修复后 Moka 侧经 NormalizeColumns 归一成同一毫秒字符串，Plan 应冻结该记录。
+func TestPlan_DateNormalizedFreeze(t *testing.T) {
+	rows := []Row{
+		{"姓名": "张伟", "转正日期": "2025-10-06"},
+	}
+	// Bitable 回读：写侧把日期写成毫秒（东八区零点），读回收 Stringify 的毫秒数字串。
+	existing := map[string]ExistingRecord{
+		"张伟": {RecordID: "rec1", Fields: Row{"姓名": "张伟", "转正日期": "1759680000000"}},
+	}
+	// 归一前：原始日期文本与毫秒字符串不等，被误判为更新。
+	raw := Plan(PlanInput{
+		Key:         key1("姓名"),
+		ReportCols:  []string{"姓名", "转正日期"},
+		TableFields: fieldSet("姓名", "转正日期"),
+		Rows:        rows,
+		Existing:    existing,
+	})
+	if len(raw.Updates) != 1 {
+		t.Fatalf("归一前应被误判为 1 条更新，got updates=%d", len(raw.Updates))
+	}
+	// 归一后：dates 列解析为同一毫秒字符串，diff 为空，冻结。
+	NormalizeColumns(rows, []string{"转正日期"}, fakeParseMillis)
+	frozen := Plan(PlanInput{
+		Key:         key1("姓名"),
+		ReportCols:  []string{"姓名", "转正日期"},
+		TableFields: fieldSet("姓名", "转正日期"),
+		Rows:        rows,
+		Existing:    existing,
+	})
+	if frozen.Frozen != 1 || len(frozen.Updates) != 0 {
+		t.Fatalf("归一后应冻结 1 条且无更新，got frozen=%d updates=%d", frozen.Frozen, len(frozen.Updates))
+	}
+}
+
+// TestPlan_CompositeKeySkipsKeyFieldsInDiff 验证复合键组成列在 diffFields 中被跳过。
+func TestPlan_CompositeKeySkipsKeyFieldsInDiff(t *testing.T) {
+	spec := KeySpec{Fields: []string{"工号", "考勤月"}, Sep: "-"}
+	rows := []Row{
+		{"工号": "A001", "考勤月": "2026-09", "出勤天数": "22"},
+	}
+	existing := map[string]ExistingRecord{
+		"A001-2026-09": {
+			RecordID: "rec1",
+			// 键列值相同，出勤天数为空（触发重写）
+			Fields: Row{"工号": "A001", "考勤月": "2026-09", "出勤天数": ""},
+		},
+	}
+	p := Plan(PlanInput{
+		Key:         spec,
+		ReportCols:  []string{"工号", "考勤月", "出勤天数"},
+		TableFields: fieldSet("工号", "考勤月", "出勤天数"),
+		Rows:        rows,
+		Existing:    existing,
+	})
+	if len(p.Updates) != 1 {
+		t.Fatalf("出勤天数为空应触发 1 条更新，got updates=%d", len(p.Updates))
+	}
+	diff := p.Updates[0].Fields
+	// 键组成列不应出现在 diff 中。
+	if _, ok := diff["工号"]; ok {
+		t.Error("键列 工号 不应出现在 diff 中")
+	}
+	if _, ok := diff["考勤月"]; ok {
+		t.Error("键列 考勤月 不应出现在 diff 中")
+	}
+	if diff["出勤天数"] != "22" {
+		t.Errorf("出勤天数应在 diff 中为 22，got %q", diff["出勤天数"])
+	}
+}
+
+// TestPlan_CompositeKeyEmptyFieldSkipped 验证复合键任一列为空时行被跳过。
+func TestPlan_CompositeKeyEmptyFieldSkipped(t *testing.T) {
+	spec := KeySpec{Fields: []string{"工号", "考勤月"}, Sep: "-"}
+	rows := []Row{
+		{"工号": "A001", "考勤月": "", "出勤天数": "22"}, // 考勤月空 → 键为空 → 跳过
+	}
+	p := Plan(PlanInput{
+		Key:         spec,
+		ReportCols:  []string{"工号", "考勤月", "出勤天数"},
+		TableFields: fieldSet("工号", "考勤月", "出勤天数"),
+		Rows:        rows,
+		Existing:    map[string]ExistingRecord{},
+	})
+	if p.SkippedNoName != 1 || len(p.Creates) != 0 {
+		t.Fatalf("复合键含空列应跳过，got skipped=%d creates=%d", p.SkippedNoName, len(p.Creates))
 	}
 }
