@@ -3,9 +3,9 @@ package moka
 import (
 	"context"
 	"encoding/json"
+	"lina-core/pkg/logger"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/os/glog"
 )
 
 const reportDataPath = "/api-platform/v1/getReportData"
@@ -42,11 +42,11 @@ type reportEnvelope struct {
 func (c *Client) GetReportData(ctx context.Context, reportID int64) (*ReportData, error) {
 	body, err := json.Marshal(map[string]int64{"reportId": reportID})
 	if err != nil {
-		return nil, gerror.Wrap(err, "moka-recruit: marshal getReportData body")
+		return nil, gerror.Wrap(err, "moka-recruit: 序列化 getReportData 请求体失败")
 	}
 
 	// 打印请求参数
-	glog.Debugf(ctx, "moka-recruit: GetReportData 请求参数 %s", string(body))
+	logger.Debugf(ctx, "moka-recruit: GetReportData 请求参数 %s", string(body))
 
 	raw, err := c.PostJSON(ctx, reportDataPath, body)
 	if err != nil {
@@ -54,21 +54,21 @@ func (c *Client) GetReportData(ctx context.Context, reportID int64) (*ReportData
 	}
 
 	// 打印原始返回值
-	// glog.Debugf(ctx, "moka-recruit: GetReportData 原始请求返回值 %s", string(raw))
+	logger.Debugf(ctx, "moka-recruit: GetReportData 原始请求返回值 %s", string(raw))
 
 	var env reportEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil, gerror.Wrapf(err, "moka-recruit: decode getReportData response: %s", truncate(string(raw), 512))
+		return nil, gerror.Wrapf(err, "moka-recruit: 解析 getReportData 响应失败: %s", truncate(string(raw), 512))
 	}
 	if env.Code != reportSuccessCode && env.Code != legacyReportSuccessCode {
-		return nil, gerror.Newf("moka-recruit: getReportData reportId=%d returned code=%d msg=%q",
+		return nil, gerror.Newf("moka-recruit: getReportData reportId=%d 接口返回 code=%d msg=%q",
 			reportID, env.Code, env.Msg)
 	}
 	if env.Data == nil {
 		return &ReportData{}, nil
 	}
 	// 打印返回值
-	glog.Debugf(ctx, "moka-recruit: GetReportData 格式化之后请求返回值 %+v", env.Data)
+	logger.Debugf(ctx, "moka-recruit: GetReportData 格式化之后请求返回值 %+v", env.Data)
 
 	return env.Data, nil
 }

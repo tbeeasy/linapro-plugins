@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lina-core/pkg/logger"
 	"net/url"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/os/glog"
 )
 
 const (
@@ -53,12 +53,31 @@ type ApplicationStage struct {
 // ArchiveReasons 归档原因来源不稳定（Moka 文档标注为 string，实际可能是含
 // name 字段的对象），故用 archiveName 容错解析，调用方通过 ArchiveReasonName 读取。
 type ApplicationBasicInfo struct {
-	ApplicationID  int64            `json:"applicationId"`
-	CandidateID    int64            `json:"candidateId"`
-	Name           string           `json:"name"`
-	Stage          ApplicationStage `json:"stage"`
-	Archived       bool             `json:"archived"`
-	ArchiveReasons archiveName      `json:"archiveReasons"`
+	ApplicationID  int64             `json:"applicationId"`
+	CandidateID    int64             `json:"candidateId"`
+	Name           string            `json:"name"`
+	Phone          string            `json:"phone"`          // 候选人电话
+	Email          string            `json:"email"`          // 候选人邮箱
+	Experience     int               `json:"experience"`     // 工作年限
+	AcademicDegree string            `json:"academicDegree"` // 学历
+	LastSchool     string            `json:"lastSchool"`     // 毕业院校
+	SourceName     string            `json:"sourceName"`     // 简历来源
+	ResumeURL      string            `json:"resumeUrl"`      // 简历文件下载链接（48h 有效）
+	ResumeKey      string            `json:"resumeKey"`      // 简历文件 key
+	AppliedAt      string            `json:"appliedAt"`      // 申请时间（ISO 8601）
+	Stage          ApplicationStage  `json:"stage"`
+	Archived       bool              `json:"archived"`
+	ArchiveReasons archiveName       `json:"archiveReasons"`
+	Owner          *ApplicationOwner `json:"owner"` // 候选人归属人（简历 owner）
+}
+
+// ApplicationOwner 是候选人归属人（简历 owner）信息。
+type ApplicationOwner struct {
+	Name       string `json:"name"`       // 归属人姓名
+	Phone      string `json:"phone"`      // 归属人电话
+	Email      string `json:"email"`      // 归属人邮箱
+	Number     string `json:"number"`     // 归属人工号（moka_employee_no 外键）
+	EmployeeID string `json:"employeeId"` // 归属人工号（同 Number，Moka 返回两个字段）
 }
 
 // ArchiveReasonName 返回归档原因文本，无归档原因时返回空串。
@@ -66,20 +85,54 @@ func (b ApplicationBasicInfo) ArchiveReasonName() string {
 	return string(b.ArchiveReasons)
 }
 
+// InterviewerRef 是面试官反馈条目内的面试官人员引用。EmployeeID 取 employeeId 字段，
+// 即该面试官的 Moka 员工工号（与 pushCandidate 事件 owners.employee_id 同工号语义），
+// 供人员字段按工号解析为 open_id。Name 仅作排障可读，不用于人员字段编码。
+type InterviewerRef struct {
+	Name       string `json:"name"`
+	EmployeeID string `json:"employeeId"`
+}
+
+// InterviewerFeedback 是 interviewInfo 条目 interviewerFeedbacks 数组的单个元素，
+// 承载一名面试官及其反馈；本同步仅取其中的面试官人员引用（Interviewer）。
+type InterviewerFeedback struct {
+	Interviewer InterviewerRef `json:"interviewer"`
+}
+
 // InterviewRound 是 ehrApplications 返回体内 interviewInfo 的单个面试轮次条目。
 // StartTime 用 flexNumberString 容错解析（Moka 可能返回毫秒时间戳数字或 ISO 字符串）。
 // IntervieweeVideoURL 在 interviewInfo 中可能为空，需求2 视频面试场景会用
 // interview-information 接口的返回值覆盖。
-// Interviewer 取 interviewInfo 条目的 name 字段，即该轮次的面试官姓名（同 pushCandidate
-// 事件 interviewers[].name 语义）；同一轮次多名面试官时每名面试官各占一条。
+// InterviewerFeedbacks 承载该轮次全部面试官（一轮可能多名），面试官工号由
+// InterviewerEmployeeNos 汇总提取，用于人员字段按工号解析。
 type InterviewRound struct {
-	Round               int              `json:"round"`
-	RoundName           string           `json:"roundName"`
-	InterviewType       InterviewType    `json:"interviewType"`
-	Status              InterviewStatus  `json:"status"`
-	StartTime           flexNumberString `json:"startTime"`
-	IntervieweeVideoURL string           `json:"intervieweeVideoUrl"`
-	Interviewer         string           `json:"name"`
+	Round                int                   `json:"round"`
+	RoundName            string                `json:"roundName"`
+	InterviewType        InterviewType         `json:"interviewType"`
+	Status               InterviewStatus       `json:"status"`
+	StartTime            flexNumberString      `json:"startTime"`
+	IntervieweeVideoURL  string                `json:"intervieweeVideoUrl"`
+	InterviewerFeedbacks []InterviewerFeedback `json:"interviewerFeedbacks"`
+}
+
+// InterviewerEmployeeNos 返回该轮次全部面试官的工号
+// （interviewerFeedbacks[].interviewer.employeeId），按出现顺序去重、跳过空工号；
+// 无面试官时返回 nil。供「面试官」人员列按工号批量解析为 open_id。
+func (r InterviewRound) InterviewerEmployeeNos() []string {
+	seen := make(map[string]struct{}, len(r.InterviewerFeedbacks))
+	nos := make([]string, 0, len(r.InterviewerFeedbacks))
+	for _, fb := range r.InterviewerFeedbacks {
+		no := strings.TrimSpace(fb.Interviewer.EmployeeID)
+		if no == "" {
+			continue
+		}
+		if _, dup := seen[no]; dup {
+			continue
+		}
+		seen[no] = struct{}{}
+		nos = append(nos, no)
+	}
+	return nos
 }
 
 // EhrApplication 是 ehrApplications 响应列表的单个候选人条目。
@@ -98,20 +151,27 @@ type ehrApplicationsEnvelope struct {
 	Code int              `json:"code"`
 	Msg  string           `json:"msg"`
 	Data []EhrApplication `json:"data"`
+	// Next 是 Moka 的分页游标：非空表示还有下一页，下次请求仅需带上该值即可续拉。
+	Next string `json:"next"`
 }
 
 // EhrApplicationsQuery 是 ehrApplications 的查询过滤条件。Archived 为 nil 时
 // 不传 archived 参数；时间范围为空时不传，传入时须为北京时间
-// `YYYY-MM-DDTHH:mm:ss.sssZ` 格式，由 Moka 服务端按申请更新时间过滤。
+// `YYYY-MM-DDTHH:mm:ss.sssZ` 格式，由 Moka 服务端按时间过滤。
 type EhrApplicationsQuery struct {
 	StageIDs          []int64 // 招聘阶段 ID 列表，必填
 	Archived          *bool   // 归档过滤：nil=不传，true=仅已归档，false=仅未归档
 	UpdateAtStartTime string  // 更新时间起（北京时间 YYYY-MM-DDTHH:mm:ss.sssZ），空=不传
 	UpdateAtEndTime   string  // 更新时间止（北京时间 YYYY-MM-DDTHH:mm:ss.sssZ），空=不传
+	// 申请时间过滤（候选人投递简历的时间）
+	ApplicationAppliedAtStartTime string // 申请时间起（北京时间 YYYY-MM-DDTHH:mm:ss.sssZ），空=不传
+	ApplicationAppliedAtEndTime   string // 申请时间止（北京时间 YYYY-MM-DDTHH:mm:ss.sssZ），空=不传
 }
 
-// EhrApplications 按 query 拉取候选人。支持按阶段 ID、归档状态和更新时间范围过滤，
+// EhrApplications 按 query 拉取候选人。支持按阶段 ID、归档状态和更新时间/申请时间范围过滤，
 // 过滤均由 Moka 服务端完成。阶段无候选人时返回空切片（非 error）。
+// Moka 该接口通过与 data 平级的 next 游标分页：返回非空 next 表示还有下一页，
+// 续拉时只需带上 next 参数（其余过滤条件无需再传），直至 next 为空聚合全部结果。
 func (c *Client) EhrApplications(ctx context.Context, query EhrApplicationsQuery) ([]EhrApplication, error) {
 	payload := map[string]any{"stageIds": query.StageIDs}
 	if query.Archived != nil {
@@ -123,34 +183,48 @@ func (c *Client) EhrApplications(ctx context.Context, query EhrApplicationsQuery
 	if query.UpdateAtEndTime != "" {
 		payload["updateAtEndTime"] = query.UpdateAtEndTime
 	}
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, gerror.Wrap(err, "moka-recruit: marshal ehrApplications body")
+	if query.ApplicationAppliedAtStartTime != "" {
+		payload["applicationAppliedAtStartTime"] = query.ApplicationAppliedAtStartTime
+	}
+	if query.ApplicationAppliedAtEndTime != "" {
+		payload["applicationAppliedAtEndTime"] = query.ApplicationAppliedAtEndTime
 	}
 
-	// 打印请求参数，便于排查日期格式等服务端解析问题。
-	glog.Debugf(ctx, "moka-recruit: ehrApplications 请求参数 %s", string(body))
+	var all []EhrApplication
+	for page := 1; ; page++ {
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return nil, gerror.Wrap(err, "moka-recruit: 序列化 ehrApplications 请求体失败")
+		}
 
-	raw, err := c.PostJSON(ctx, ehrApplicationsPath, body)
-	if err != nil {
-		return nil, err
+		// 打印请求参数，便于排查日期格式等服务端解析问题。
+		logger.Debugf(ctx, "moka-recruit: ehrApplications 第 %d 页请求参数 %s", page, string(body))
+
+		raw, err := c.PostJSON(ctx, ehrApplicationsPath, body)
+		if err != nil {
+			return nil, err
+		}
+
+		var env ehrApplicationsEnvelope
+		if err := json.Unmarshal(raw, &env); err != nil {
+			return nil, gerror.Wrapf(err, "moka-recruit: 解析 ehrApplications 响应失败: %s", truncate(string(raw), 512))
+		}
+		if env.Code != 200 {
+			return nil, gerror.Newf("moka-recruit: ehrApplications 接口返回 code=%d msg=%q", env.Code, env.Msg)
+		}
+
+		all = append(all, env.Data...)
+		logger.Debugf(ctx, "moka-recruit: ehrApplications 第 %d 页返回 %d 条, next=%q", page, len(env.Data), env.Next)
+
+		// next 为空表示无更多分页，结束聚合。
+		if strings.TrimSpace(env.Next) == "" {
+			break
+		}
+		// 续拉时仅需带上 next 游标，其余过滤条件不再传递。
+		payload = map[string]any{"next": env.Next}
 	}
 
-	// 打印原始返回值
-	// glog.Debugf(ctx, "moka-recruit: ehrApplications 原始请求返回值 %s", string(raw))
-
-	var env ehrApplicationsEnvelope
-	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil, gerror.Wrapf(err, "moka-recruit: decode ehrApplications response: %s", truncate(string(raw), 512))
-	}
-	if env.Code != 200 {
-		return nil, gerror.Newf("moka-recruit: ehrApplications returned code=%d msg=%q", env.Code, env.Msg)
-	}
-	// 打印返回值
-	glog.Debugf(ctx, "moka-recruit: ehrApplications 请求返回值 %+v", env.Data)
-
-	return env.Data, nil
+	return all, nil
 }
 
 // MoveApplicationStage 将候选人申请推进到指定阶段。
@@ -202,10 +276,10 @@ func (c *Client) GetInterviewInformation(ctx context.Context, applicationIDs []i
 		"email":          email,
 	})
 	if err != nil {
-		return nil, gerror.Wrap(err, "moka-recruit: marshal interview-information body")
+		return nil, gerror.Wrap(err, "moka-recruit: 序列化 interview-information 请求体失败")
 	}
 
-	glog.Debugf(ctx, "moka-recruit: GetInterviewInformation 请求参数 %s", string(body))
+	logger.Debugf(ctx, "moka-recruit: GetInterviewInformation 请求参数 %s", string(body))
 
 	raw, err := c.PostJSON(ctx, interviewInformationPath, body)
 	if err != nil {
@@ -213,18 +287,18 @@ func (c *Client) GetInterviewInformation(ctx context.Context, applicationIDs []i
 	}
 
 	// 打印原始返回值
-	// glog.Debugf(ctx, "moka-recruit: GetInterviewInformation 原始请求返回值 %s", string(raw))
+	logger.Debugf(ctx, "moka-recruit: GetInterviewInformation 原始请求返回值 %s", string(raw))
 
 	var env interviewInformationEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil, gerror.Wrapf(err, "moka-recruit: decode interview-information response: %s", truncate(string(raw), 512))
+		return nil, gerror.Wrapf(err, "moka-recruit: 解析 interview-information 响应失败: %s", truncate(string(raw), 512))
 	}
 	if env.Code != 0 {
-		return nil, gerror.Newf("moka-recruit: interview-information returned code=%d msg=%q", env.Code, env.Msg)
+		return nil, gerror.Newf("moka-recruit: interview-information 接口返回 code=%d msg=%q", env.Code, env.Msg)
 	}
 
 	// 打印返回值
-	glog.Debugf(ctx, "moka-recruit: GetInterviewInformation 格式化之后请求返回值 %+v", env.Data)
+	logger.Debugf(ctx, "moka-recruit: GetInterviewInformation 格式化之后请求返回值 %+v", env.Data)
 
 	return env.Data, nil
 }

@@ -29,7 +29,7 @@ type resumeEnvelope struct {
 func (c *Client) GetResumeContent(ctx context.Context, applicationID int64) (*ResumeContent, error) {
 	body, err := json.Marshal(map[string]int64{"applicationId": applicationID})
 	if err != nil {
-		return nil, gerror.Wrap(err, "moka-recruit: marshal resumeContent body")
+		return nil, gerror.Wrap(err, "moka-recruit: 序列化 resumeContent 请求体失败")
 	}
 
 	raw, err := c.PostJSON(ctx, resumeContentPath, body)
@@ -39,10 +39,10 @@ func (c *Client) GetResumeContent(ctx context.Context, applicationID int64) (*Re
 
 	var env resumeEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil, gerror.Wrapf(err, "moka-recruit: decode resumeContent response: %s", truncate(string(raw), 512))
+		return nil, gerror.Wrapf(err, "moka-recruit: 解析 resumeContent 响应失败: %s", truncate(string(raw), 512))
 	}
 	if env.Code != 200 {
-		return nil, gerror.Newf("moka-recruit: resumeContent applicationId=%d returned code=%d msg=%q",
+		return nil, gerror.Newf("moka-recruit: resumeContent applicationId=%d 接口返回 code=%d msg=%q",
 			applicationID, env.Code, env.Msg)
 	}
 	if env.Data == nil {

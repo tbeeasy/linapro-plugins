@@ -34,10 +34,10 @@ func (c *Client) GetStagesList(ctx context.Context) ([]Stage, error) {
 
 	var env stagesEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil, gerror.Wrapf(err, "moka-recruit: decode getStagesList response: %s", truncate(string(raw), 512))
+		return nil, gerror.Wrapf(err, "moka-recruit: 解析 getStagesList 响应失败: %s", truncate(string(raw), 512))
 	}
 	if env.Code != 200 {
-		return nil, gerror.Newf("moka-recruit: getStagesList returned code=%d msg=%q", env.Code, env.Msg)
+		return nil, gerror.Newf("moka-recruit: getStagesList 接口返回 code=%d msg=%q", env.Code, env.Msg)
 	}
 	return env.Data, nil
 }

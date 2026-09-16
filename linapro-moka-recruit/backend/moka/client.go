@@ -18,6 +18,13 @@ import (
 // DefaultBaseURL 是 Moka OpenAPI 主机地址。
 const DefaultBaseURL = "https://api.mokahr.com"
 
+// defaultRequestTimeout 是单次 HTTP 请求的超时（http.Client.Timeout），**按请求生效**而非按整个任务。
+// 取 60s 而非更短：ehrApplications 等接口实测存在响应头迟迟不返回的慢查询，30s 曾触发
+// `context deadline exceeded (Client.Timeout exceeded while awaiting headers)` 导致整轮候选人轮询失败。
+// 上限受调度器的任务级 ctx 约束（插件托管任务默认 5 分钟），而 ehrApplications 是分页循环、
+// 每页各占一次本超时，故不宜再调大：需为分页累计耗时与后续 Bitable/报表写入留出余量。
+const defaultRequestTimeout = 60 * time.Second
+
 // Client 是 Moka 招聘 OpenAPI 的 HTTP 客户端。它将鉴权委托给注入的 Author，
 // 使同一套传输层同时适用于 HCM 与 OAuth2 两种模式。可安全并发使用。
 type Client struct {
@@ -34,7 +41,7 @@ func NewClient(baseURL string, auth Author) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		auth:    auth,
-		http:    &http.Client{Timeout: 30 * time.Second},
+		http:    &http.Client{Timeout: defaultRequestTimeout},
 	}
 }
 
@@ -45,7 +52,7 @@ func (c *Client) PostJSON(ctx context.Context, path string, body []byte) ([]byte
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.baseURL+path, strings.NewReader(string(body)))
 	if err != nil {
-		return nil, gerror.Wrap(err, "moka-recruit: build request")
+		return nil, gerror.Wrap(err, "moka-recruit: 构建请求失败")
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -55,16 +62,16 @@ func (c *Client) PostJSON(ctx context.Context, path string, body []byte) ([]byte
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, gerror.Wrap(err, "moka-recruit: request failed")
+		return nil, gerror.Wrap(err, "moka-recruit: 请求失败")
 	}
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, gerror.Wrap(err, "moka-recruit: read response body")
+		return nil, gerror.Wrap(err, "moka-recruit: 读取响应体失败")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, gerror.Newf("moka-recruit: HTTP %d: %s", resp.StatusCode, truncate(string(data), 512))
+		return nil, gerror.Newf("moka-recruit: HTTP 状态码 %d: %s", resp.StatusCode, truncate(string(data), 512))
 	}
 	return data, nil
 }
@@ -78,7 +85,7 @@ func (c *Client) PutQuery(ctx context.Context, path string, params url.Values) e
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, rawURL, nil)
 	if err != nil {
-		return gerror.Wrap(err, "moka-recruit: build PUT request")
+		return gerror.Wrap(err, "moka-recruit: 构建 PUT 请求失败")
 	}
 
 	if err := c.auth.ApplyAuth(ctx, req); err != nil {
@@ -87,13 +94,13 @@ func (c *Client) PutQuery(ctx context.Context, path string, params url.Values) e
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return gerror.Wrap(err, "moka-recruit: PUT request failed")
+		return gerror.Wrap(err, "moka-recruit: PUT 请求失败")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
-		return gerror.Newf("moka-recruit: HTTP %d: %s", resp.StatusCode, truncate(string(body), 512))
+		return gerror.Newf("moka-recruit: HTTP 状态码 %d: %s", resp.StatusCode, truncate(string(body), 512))
 	}
 	return nil
 }
@@ -103,7 +110,7 @@ func (c *Client) PutQuery(ctx context.Context, path string, params url.Values) e
 func (c *Client) GetJSON(ctx context.Context, path string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
-		return nil, gerror.Wrap(err, "moka-recruit: build GET request")
+		return nil, gerror.Wrap(err, "moka-recruit: 构建 GET 请求失败")
 	}
 
 	if err := c.auth.ApplyAuth(ctx, req); err != nil {
@@ -112,16 +119,16 @@ func (c *Client) GetJSON(ctx context.Context, path string) ([]byte, error) {
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, gerror.Wrap(err, "moka-recruit: GET request failed")
+		return nil, gerror.Wrap(err, "moka-recruit: GET 请求失败")
 	}
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, gerror.Wrap(err, "moka-recruit: read GET response body")
+		return nil, gerror.Wrap(err, "moka-recruit: 读取 GET 响应体失败")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, gerror.Newf("moka-recruit: HTTP %d: %s", resp.StatusCode, truncate(string(data), 512))
+		return nil, gerror.Newf("moka-recruit: HTTP 状态码 %d: %s", resp.StatusCode, truncate(string(data), 512))
 	}
 	return data, nil
 }

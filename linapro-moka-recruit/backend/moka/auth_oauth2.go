@@ -87,39 +87,39 @@ func (a *OAuth2Auth) fetchToken(ctx context.Context) (string, error) {
 		"grantType":    "client_credentials",
 	})
 	if err != nil {
-		return "", gerror.Wrap(err, "moka-recruit: marshal oauth2 token request")
+		return "", gerror.Wrap(err, "moka-recruit: 序列化 oauth2 令牌请求体失败")
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		a.baseURL+oauth2TokenPath, bytes.NewReader(body))
 	if err != nil {
-		return "", gerror.Wrap(err, "moka-recruit: build oauth2 token request")
+		return "", gerror.Wrap(err, "moka-recruit: 构建 oauth2 令牌请求失败")
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := a.http.Do(req)
 	if err != nil {
-		return "", gerror.Wrap(err, "moka-recruit: oauth2 token request failed")
+		return "", gerror.Wrap(err, "moka-recruit: oauth2 令牌请求失败")
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", gerror.Wrap(err, "moka-recruit: read oauth2 token response")
+		return "", gerror.Wrap(err, "moka-recruit: 读取 oauth2 令牌响应失败")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", gerror.Newf("moka-recruit: oauth2 token HTTP %d: %s", resp.StatusCode, truncate(string(raw), 256))
+		return "", gerror.Newf("moka-recruit: oauth2 令牌接口 HTTP %d: %s", resp.StatusCode, truncate(string(raw), 256))
 	}
 
 	var env oauth2TokenResp
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return "", gerror.Wrapf(err, "moka-recruit: decode oauth2 token response: %s", truncate(string(raw), 256))
+		return "", gerror.Wrapf(err, "moka-recruit: 解析 oauth2 令牌响应失败: %s", truncate(string(raw), 256))
 	}
 	if env.Code != 0 {
-		return "", gerror.Newf("moka-recruit: oauth2 token error code=%d msg=%q", env.Code, env.Msg)
+		return "", gerror.Newf("moka-recruit: oauth2 令牌接口错误 code=%d msg=%q", env.Code, env.Msg)
 	}
 	if env.Data.AccessToken == "" {
-		return "", fmt.Errorf("moka-recruit: oauth2 token response missing accessToken")
+		return "", fmt.Errorf("moka-recruit: oauth2 令牌响应缺少 accessToken 字段")
 	}
 
 	a.token = env.Data.AccessToken
