@@ -59,7 +59,7 @@ func NewClient(baseURL string, cred HCMCredential) *Client {
 func (c *Client) PostJSON(ctx context.Context, path string, apiCode string, body []byte, extra map[string]string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, strings.NewReader(string(body)))
 	if err != nil {
-		return nil, gerror.Wrap(err, "hcm: build request")
+		return nil, gerror.Wrap(err, "hcm: 构建请求失败")
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -69,16 +69,16 @@ func (c *Client) PostJSON(ctx context.Context, path string, apiCode string, body
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, gerror.Wrap(err, "hcm: request failed")
+		return nil, gerror.Wrap(err, "hcm: 请求发送失败")
 	}
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, gerror.Wrap(err, "hcm: read response body")
+		return nil, gerror.Wrap(err, "hcm: 读取响应体失败")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, gerror.Newf("hcm: HTTP %d: %s", resp.StatusCode, truncate(string(data), 512))
+		return nil, gerror.Newf("hcm: HTTP 状态码 %d：%s", resp.StatusCode, truncate(string(data), 512))
 	}
 	return data, nil
 }

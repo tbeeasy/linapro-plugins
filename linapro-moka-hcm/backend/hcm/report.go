@@ -3,9 +3,9 @@ package hcm
 import (
 	"context"
 	"encoding/json"
+	"lina-core/pkg/logger"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/os/glog"
 )
 
 const reportDataPath = "/api-platform/hcm/oapi/v1/report/getReportData"
@@ -47,11 +47,11 @@ type reportEnvelope struct {
 func (c *Client) GetReportData(ctx context.Context, reportID int64) (*ReportData, error) {
 	body, err := json.Marshal(map[string]int64{"reportId": reportID})
 	if err != nil {
-		return nil, gerror.Wrap(err, "hcm: marshal getReportData body")
+		return nil, gerror.Wrap(err, "hcm: 序列化 getReportData 请求体失败")
 	}
 
 	// 打印请求参数
-	glog.Debugf(ctx, "moka-hcm: GetReportData 请求参数 %s", string(body))
+	logger.Debugf(ctx, "moka-hcm: GetReportData 请求参数 %s", string(body))
 
 	raw, err := c.PostJSON(ctx, reportDataPath, c.cred.APICodes[APICodeKeyReportData], body, nil)
 	if err != nil {
@@ -59,21 +59,21 @@ func (c *Client) GetReportData(ctx context.Context, reportID int64) (*ReportData
 	}
 
 	// 打印原始返回值
-	glog.Debugf(ctx, "moka-hcm: GetReportData 原始请求返回值 %s", string(raw))
+	logger.Debugf(ctx, "moka-hcm: GetReportData 原始请求返回值 %s", string(raw))
 
 	var env reportEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil, gerror.Wrapf(err, "hcm: decode getReportData response: %s", truncate(string(raw), 512))
+		return nil, gerror.Wrapf(err, "hcm: 解析 getReportData 响应失败：%s", truncate(string(raw), 512))
 	}
 	if env.Code != reportSuccessCode && env.Code != legacyReportSuccessCode {
-		return nil, gerror.Newf("hcm: getReportData reportId=%d returned code=%d msg=%q",
+		return nil, gerror.Newf("hcm: getReportData reportId=%d 返回 code=%d msg=%q",
 			reportID, env.Code, env.Msg)
 	}
 	if env.Data == nil {
 		return &ReportData{}, nil
 	}
 
-	glog.Debugf(ctx, "moka-hcm: GetReportData 格式化之后请求返回值 %+v", env.Data)
+	logger.Debugf(ctx, "moka-hcm: GetReportData 格式化之后请求返回值 %+v", env.Data)
 
 	return env.Data, nil
 }

@@ -3,9 +3,9 @@ package hcm
 import (
 	"context"
 	"encoding/json"
+	"lina-core/pkg/logger"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/os/glog"
 )
 
 const batchDataPath = "/api-platform/hcm/oapi/v2/batch/data"
@@ -106,7 +106,7 @@ func (c *Client) ListEmployees(ctx context.Context, pageNum, pageSize int) (list
 		"pageNum":  pageNum,
 	})
 	if err != nil {
-		return nil, 0, gerror.Wrap(err, "hcm: marshal ListEmployees body")
+		return nil, 0, gerror.Wrap(err, "hcm: 序列化 ListEmployees 请求体失败")
 	}
 
 	// batch/data 要求以 userName（操作人邮箱）作为签名查询参数，取自凭证 OperatorEmail。
@@ -114,7 +114,7 @@ func (c *Client) ListEmployees(ctx context.Context, pageNum, pageSize int) (list
 	extra := map[string]string{"userName": c.cred.OperatorEmail}
 
 	// 打印请求参数
-	glog.Debugf(ctx, "moka-hcm: ListEmployees 请求参数 %s userName=%s", string(body), c.cred.OperatorEmail)
+	logger.Debugf(ctx, "moka-hcm: ListEmployees 请求参数 %s userName=%s", string(body), c.cred.OperatorEmail)
 
 	raw, err := c.PostJSON(ctx, batchDataPath, c.cred.APICodes[APICodeKeyBatchData], body, extra)
 	if err != nil {
@@ -122,14 +122,14 @@ func (c *Client) ListEmployees(ctx context.Context, pageNum, pageSize int) (list
 	}
 
 	// 打印原始返回值
-	glog.Debugf(ctx, "moka-hcm: ListEmployees 原始请求返回值 %s", string(raw))
+	logger.Debugf(ctx, "moka-hcm: ListEmployees 原始请求返回值 %s", string(raw))
 
 	var env batchDataEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil, 0, gerror.Wrapf(err, "hcm: decode ListEmployees response: %s", truncate(string(raw), 512))
+		return nil, 0, gerror.Wrapf(err, "hcm: 解析 ListEmployees 响应失败：%s", truncate(string(raw), 512))
 	}
 	if env.Code != 200 {
-		return nil, 0, gerror.Newf("hcm: ListEmployees page=%d returned code=%d msg=%q", pageNum, env.Code, env.Msg)
+		return nil, 0, gerror.Newf("hcm: ListEmployees 第 %d 页返回 code=%d msg=%q", pageNum, env.Code, env.Msg)
 	}
 	if env.Data == nil {
 		return nil, 0, nil
@@ -140,7 +140,7 @@ func (c *Client) ListEmployees(ctx context.Context, pageNum, pageSize int) (list
 		out = append(out, r.toHCMEmployee())
 	}
 
-	glog.Debugf(ctx, "moka-hcm: ListEmployees 格式化之后请求返回值 %+v", out)
+	logger.Debugf(ctx, "moka-hcm: ListEmployees 格式化之后请求返回值 %+v", out)
 
 	return out, env.Data.Total, nil
 }

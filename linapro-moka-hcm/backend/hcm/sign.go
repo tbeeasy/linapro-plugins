@@ -43,18 +43,18 @@ func CanonicalString(params map[string]string) string {
 func ParsePrivateKey(pemData string) (*rsa.PrivateKey, error) {
 	block, _ := pem.Decode([]byte(strings.TrimSpace(pemData)))
 	if block == nil {
-		return nil, gerror.New("hcm: no PEM block found in RSA private key")
+		return nil, gerror.New("hcm: RSA 私钥中未找到 PEM 块")
 	}
 	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
 		return key, nil
 	}
 	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
-		return nil, gerror.Wrap(err, "hcm: parse RSA private key (tried PKCS#1 and PKCS#8)")
+		return nil, gerror.Wrap(err, "hcm: 解析 RSA 私钥失败（已尝试 PKCS#1 与 PKCS#8）")
 	}
 	key, ok := parsed.(*rsa.PrivateKey)
 	if !ok {
-		return nil, gerror.Newf("hcm: PKCS#8 key is not RSA (%T)", parsed)
+		return nil, gerror.Newf("hcm: PKCS#8 私钥不是 RSA 类型（%T）", parsed)
 	}
 	return key, nil
 }
@@ -64,12 +64,12 @@ func ParsePrivateKey(pemData string) (*rsa.PrivateKey, error) {
 // 确保 URL 编码只发生一次。
 func Sign(params map[string]string, priv *rsa.PrivateKey) (string, error) {
 	if priv == nil {
-		return "", gerror.New("hcm: nil RSA private key")
+		return "", gerror.New("hcm: RSA 私钥为空")
 	}
 	digest := md5.Sum([]byte(CanonicalString(params)))
 	sig, err := rsa.SignPKCS1v15(rand.Reader, priv, crypto.MD5, digest[:])
 	if err != nil {
-		return "", gerror.Wrap(err, "hcm: RSA sign failed")
+		return "", gerror.Wrap(err, "hcm: RSA 签名失败")
 	}
 	return base64.StdEncoding.EncodeToString(sig), nil
 }
@@ -79,11 +79,11 @@ func Sign(params map[string]string, priv *rsa.PrivateKey) (string, error) {
 func Verify(params map[string]string, signB64 string, pub *rsa.PublicKey) error {
 	sig, err := base64.StdEncoding.DecodeString(signB64)
 	if err != nil {
-		return gerror.Wrap(err, "hcm: decode signature")
+		return gerror.Wrap(err, "hcm: 解码签名失败")
 	}
 	digest := md5.Sum([]byte(CanonicalString(params)))
 	if err := rsa.VerifyPKCS1v15(pub, crypto.MD5, digest[:], sig); err != nil {
-		return gerror.Wrap(err, "hcm: signature verify failed")
+		return gerror.Wrap(err, "hcm: 签名校验失败")
 	}
 	return nil
 }

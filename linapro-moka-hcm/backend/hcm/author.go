@@ -92,7 +92,7 @@ func nonce() (string, error) {
 	const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	buf := make([]byte, 8)
 	if _, err := rand.Read(buf); err != nil {
-		return "", gerror.Wrap(err, "hcm: generate nonce")
+		return "", gerror.Wrap(err, "hcm: 生成 nonce 失败")
 	}
 	for i := range buf {
 		buf[i] = alphabet[int(buf[i])%len(alphabet)]
