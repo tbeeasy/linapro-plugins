@@ -2,6 +2,8 @@ package syncer
 
 import (
 	"testing"
+
+	larkbitablesdk "github.com/larksuite/oapi-sdk-go/v3/service/bitable/v1"
 )
 
 func fieldSet(cols ...string) map[string]struct{} {
@@ -134,6 +136,65 @@ func TestPlan_OnlyWritesIntersectionColumns(t *testing.T) {
 	}
 }
 
+// TestPlan_NumberStronglyTypedFreeze 锁定强类型数字比对：Moka 侧 "90" 与 Bitable 回读侧
+// "90.0" 在数值上相等。旧的纯字符串比对会把它误判为变更、每轮空转重写；接入 FieldTypes 后
+// 数字列两侧 ParseFloat 判等，应冻结。不给 FieldTypes（退化为文本比对）时仍复现旧误判。
+func TestPlan_NumberStronglyTypedFreeze(t *testing.T) {
+	base := PlanInput{
+		Key:         key1("工号"),
+		ReportCols:  []string{"工号", "出勤天数"},
+		TableFields: fieldSet("工号", "出勤天数"),
+		Rows: []Row{
+			{"工号": "A001", "出勤天数": "90"},
+		},
+		Existing: map[string]ExistingRecord{
+			"A001": {RecordID: "rec1", Fields: Row{"工号": "A001", "出勤天数": "90.0"}},
+		},
+	}
+
+	// 文本比对（无 FieldTypes）：复现旧误判为 1 条更新。
+	if got := Plan(base); len(got.Updates) != 1 {
+		t.Fatalf("文本比对下 \"90\" vs \"90.0\" 应复现误判为 1 条更新，got updates=%d frozen=%d", len(got.Updates), got.Frozen)
+	}
+
+	// 强类型比对：声明数字列后应冻结。
+	base.FieldTypes = map[string]int{"出勤天数": larkbitablesdk.TypeNumber}
+	got := Plan(base)
+	if got.Frozen != 1 || len(got.Updates) != 0 {
+		t.Fatalf("数字列 \"90\" 与 \"90.0\" 应判等而冻结，got frozen=%d updates=%d", got.Frozen, len(got.Updates))
+	}
+}
+
+// TestPlan_DateScientificNotationFreeze 锁定强类型日期比对消化科学计数法：飞书日期列回读为
+// 数字，大整数经字符串化后呈科学计数法（如 "1.75968e+12"），与 Moka 侧归一后的毫秒整数串
+// "1759680000000" 纯文本比对不相等。接入 FieldTypes 后两侧归一到 int64 毫秒判等，应冻结。
+func TestPlan_DateScientificNotationFreeze(t *testing.T) {
+	base := PlanInput{
+		Key:         key1("姓名"),
+		ReportCols:  []string{"姓名", "转正日期"},
+		TableFields: fieldSet("姓名", "转正日期"),
+		Rows: []Row{
+			// normalizeColumns 已把日期文本归一为毫秒整数串。
+			{"姓名": "张伟", "转正日期": "1759680000000"},
+		},
+		Existing: map[string]ExistingRecord{
+			"张伟": {RecordID: "rec1", Fields: Row{"姓名": "张伟", "转正日期": "1.75968e+12"}},
+		},
+	}
+
+	// 文本比对（无 FieldTypes）：科学计数法回读与毫秒整数串不等，复现误判为 1 条更新。
+	if got := Plan(base); len(got.Updates) != 1 {
+		t.Fatalf("文本比对下科学计数法回读应复现误判为 1 条更新，got updates=%d frozen=%d", len(got.Updates), got.Frozen)
+	}
+
+	// 强类型比对：声明日期列后两侧归一到毫秒判等，应冻结。
+	base.FieldTypes = map[string]int{"转正日期": larkbitablesdk.TypeDateTime}
+	got := Plan(base)
+	if got.Frozen != 1 || len(got.Updates) != 0 {
+		t.Fatalf("日期列毫秒串与科学计数法回读应判等而冻结，got frozen=%d updates=%d", got.Frozen, len(got.Updates))
+	}
+}
+
 func TestFlattenReport_MapsTitlesToValues(t *testing.T) {
 	data := &ReportData{
 		Headers: []ReportHeader{
@@ -258,5 +319,149 @@ func TestPlan_CompositeKeyEmptyFieldSkipped(t *testing.T) {
 	})
 	if p.SkippedNoName != 1 || len(p.Creates) != 0 {
 		t.Fatalf("复合键含空列应跳过，got skipped=%d creates=%d", p.SkippedNoName, len(p.Creates))
+	}
+}
+
+// fakeResolveOpenIDs 是测试替身：模拟「多工号 → 去重 open_id 集合」解析器（empcap 复数版）。
+// GZ000040 对应双租户同人两个 open_id，用于验证多 id 与顺序无关判等。
+func fakeResolveOpenIDs(empNos []string) []string {
+	var ids []string
+	for _, no := range empNos {
+		switch no {
+		case "GZ000040":
+			ids = append(ids, "ou_huang", "ou_huang_alt")
+		case "GZ000500":
+			ids = append(ids, "ou_lixi")
+		}
+	}
+	return ids
+}
+
+// personPlanInput 构造一个「人员列已声明 + 已注入解析器」的 PlanInput 基座。
+func personPlanInput() PlanInput {
+	return PlanInput{
+		Key:                           key1("工号"),
+		ReportCols:                    []string{"工号", "直接上级"},
+		TableFields:                   fieldSet("工号", "直接上级"),
+		PersonCols:                    fieldSet("直接上级"),
+		ResolvePersonIDsByEmployeeNos: fakeResolveOpenIDs,
+	}
+}
+
+// TestPlan_PersonColumnFreezesWhenOpenIDSetEqual 复现「人员列每轮空转重写」缺陷并锁定修复。
+// Moka 侧 `直接上级` 值是工号 GZ000040，Bitable 回读侧 Fields 中是姓名「黄春越」——
+// 二者不在同一空间，按文本比对永远不等，人员列会每轮被误判为变更并重写。
+// 修复后按 open_id 集合比对：回读 PersonIDs 与工号解析结果等价，应冻结。
+func TestPlan_PersonColumnFreezesWhenOpenIDSetEqual(t *testing.T) {
+	rows := []Row{
+		{"工号": "GZ000500", "直接上级": "GZ000040"},
+	}
+	existing := map[string]ExistingRecord{
+		"GZ000500": {
+			RecordID: "rec1",
+			// 回读侧人员列是姓名文本，与 Moka 侧工号必然不等。
+			Fields: Row{"工号": "GZ000500", "直接上级": "黄春越"},
+			// 结构化旁路给出该单元格真实的 open_id 集合（顺序与解析器返回不同）。
+			PersonIDs: map[string][]string{"直接上级": {"ou_huang_alt", "ou_huang"}},
+		},
+	}
+	base := personPlanInput()
+	base.Rows = rows
+	base.Existing = existing
+
+	// 未声明人员列时退化为文本比对：复现缺陷，工号 vs 姓名被误判为 1 条更新。
+	raw := base
+	raw.PersonCols = nil
+	raw.ResolvePersonIDsByEmployeeNos = nil
+	if got := Plan(raw); len(got.Updates) != 1 {
+		t.Fatalf("文本比对下应复现误判为 1 条更新，got updates=%d frozen=%d", len(got.Updates), got.Frozen)
+	}
+
+	// 声明人员列并注入解析器后：open_id 集合等价（顺序不同不影响），应冻结。
+	got := Plan(base)
+	if got.Frozen != 1 || len(got.Updates) != 0 {
+		t.Fatalf("open_id 集合等价应冻结，got frozen=%d updates=%d", got.Frozen, len(got.Updates))
+	}
+}
+
+// TestPlan_PersonColumnUpdatesWhenOpenIDSetDiffers 验证 open_id 集合不等价时仍会更新
+// （换人、离职复入导致 id 漂移），且写入的是**已解析的 open_id 集合**：
+// 人员列不进 Fields（工号文本无法写进飞书人员字段），而是产出到 op.Persons 旁路。
+func TestPlan_PersonColumnUpdatesWhenOpenIDSetDiffers(t *testing.T) {
+	in := personPlanInput()
+	in.Rows = []Row{
+		{"工号": "GZ000500", "直接上级": "GZ000040"},
+	}
+	in.Existing = map[string]ExistingRecord{
+		"GZ000500": {
+			RecordID:  "rec1",
+			Fields:    Row{"工号": "GZ000500", "直接上级": "旧上级"},
+			PersonIDs: map[string][]string{"直接上级": {"ou_someone_else"}},
+		},
+	}
+	p := Plan(in)
+	if len(p.Updates) != 1 {
+		t.Fatalf("open_id 集合不等价应产生 1 条更新，got updates=%d frozen=%d", len(p.Updates), p.Frozen)
+	}
+	u := p.Updates[0]
+	if _, ok := u.Fields["直接上级"]; ok {
+		t.Fatalf("人员列不应进入 Fields（工号文本写不进人员字段），got %v", u.Fields)
+	}
+	got := u.Persons["直接上级"]
+	want := []string{"ou_huang", "ou_huang_alt"}
+	if len(got) != len(want) {
+		t.Fatalf("Persons 应携带已解析的 open_id 集合，got %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Persons open_id 顺序/内容: got %v want %v", got, want)
+		}
+	}
+}
+
+// TestPlan_PersonColumnSkippedWhenEmpty 验证工号不可解析/未声明来源列时该列被清空，
+// 不参与 diff，也不因人员列触发更新（preparePersonFields 会把这类列置空）。
+func TestPlan_PersonColumnSkippedWhenEmpty(t *testing.T) {
+	in := personPlanInput()
+	in.Rows = []Row{
+		{"工号": "GZ000500", "直接上级": ""}, // 解析不到 open_id → 置空
+	}
+	in.Existing = map[string]ExistingRecord{
+		"GZ000500": {
+			RecordID:  "rec1",
+			Fields:    Row{"工号": "GZ000500", "直接上级": "黄春越"},
+			PersonIDs: map[string][]string{"直接上级": {"ou_huang"}},
+		},
+	}
+	p := Plan(in)
+	if p.Frozen != 1 || len(p.Updates) != 0 {
+		t.Fatalf("空人员列应跳过且冻结，got frozen=%d updates=%d", p.Frozen, len(p.Updates))
+	}
+}
+
+// TestPlan_PersonColumnCreatesWithResolvedIDs 验证新增行的人员列同样经 op.Persons 旁路
+// 携带已解析 open_id 集合（而非工号文本），且多工号拼接值按逗号拆分后合并去重。
+func TestPlan_PersonColumnCreatesWithResolvedIDs(t *testing.T) {
+	in := personPlanInput()
+	in.Rows = []Row{
+		{"工号": "GZ000600", "直接上级": "GZ000040, GZ000500"},
+	}
+	in.Existing = map[string]ExistingRecord{}
+	p := Plan(in)
+	if len(p.Creates) != 1 {
+		t.Fatalf("应产生 1 条新增，got %+v", p)
+	}
+	if _, ok := p.Creates[0].Fields["直接上级"]; ok {
+		t.Fatalf("人员列不应进入 Fields，got %v", p.Creates[0].Fields)
+	}
+	got := p.Creates[0].Persons["直接上级"]
+	want := []string{"ou_huang", "ou_huang_alt", "ou_lixi"}
+	if len(got) != len(want) {
+		t.Fatalf("多工号应合并为 3 个 open_id，got %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("open_id 顺序/内容: got %v want %v", got, want)
+		}
 	}
 }
