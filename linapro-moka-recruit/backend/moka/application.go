@@ -205,6 +205,9 @@ func (c *Client) EhrApplications(ctx context.Context, query EhrApplicationsQuery
 			return nil, err
 		}
 
+		// 打印原始返回值
+		logger.Debugf(ctx, "moka-recruit: ehrApplications 原始请求返回值 %s", string(raw))
+
 		var env ehrApplicationsEnvelope
 		if err := json.Unmarshal(raw, &env); err != nil {
 			return nil, gerror.Wrapf(err, "moka-recruit: 解析 ehrApplications 响应失败: %s", truncate(string(raw), 512))
