@@ -1,0 +1,49 @@
+# 插件唯一标识，必须在宿主和源码插件目录中保持唯一，并使用 `kebab-case` 命名风格。
+id: linapro-recruit-pipeline
+
+# 插件显示名称，用于插件管理页面、开发文档和展示。
+name: 招聘流水线
+
+# 插件语义化版本号，当前示例统一使用带 `v` 前缀的写法。
+version: v0.1.0
+
+# 插件类型枚举。可选值：`source` 表示随宿主源码编译交付；`dynamic` 表示作为运行时动态插件产物加载。
+type: source
+
+# 插件分发治理枚举。`managed` 表示本领域插件通过插件管理显式治理；它不是宿主关键 builtin，宿主启动不会自动安装。
+distribution: managed
+
+# 多租户作用域枚举。可选值：`platform_only` 表示仅平台上下文可见和治理；`tenant_aware` 表示按租户上下文治理。
+# 本插件为招聘业务编排层，仅在平台层面运行。
+scope_nature: platform_only
+
+# 多租户支持标记。`true` 表示插件支持租户级安装、租户级启用与新租户开通策略治理。
+supports_multi_tenant: false
+
+# 默认安装模式枚举。可选值：`global` 表示全局统一安装启用；`tenant_scoped` 表示按租户独立启用或禁用。
+# 本插件随宿主全局统一启用，不按租户独立启停。
+default_install_mode: global
+
+# 插件说明，概述招聘流水线三条业务需求的能力边界与编排依赖。
+description: |
+  招聘流水线业务编排层，依赖 linapro-moka-recruit 客户端。
+  - 需求1：定时轮询 Moka 初筛阶段候选人，获取简历写飞书 Bitable，AI 判定后推进面试阶段。
+  - 需求2：定时同步面试取消状态（status=3）回写 Bitable。
+  - 需求3：定时从招聘报表回写评分列到 Bitable 已有记录。
+  本插件不提供独立客户端能力，仅编排招聘业务流水线。
+
+# 插件作者或归属团队。
+author: linapro
+
+# 插件许可证标识。
+license: Apache-2.0
+
+# 插件国际化配置。该配置与宿主 i18n 配置结构保持一致；启用后需提供对应语言资源。
+i18n:
+  enabled: true
+  default: zh-CN
+  locales:
+    - locale: en-US
+      nativeName: English
+    - locale: zh-CN
+      nativeName: 简体中文
