@@ -168,13 +168,15 @@ func (c *Client) ListRecords(ctx context.Context, t Table, keyOf func(Row) strin
 // 返回 ExistingRecord（与 ListRecords 回读语义一致）：文本投影 Fields + 人员列结构化旁路
 // Persons —— 对 TypeUser 列另按官方 Person 结构解析出用户身份集合（含 open_id），供调用方对
 // 人员列做 open_id 集合比对而非姓名文本比对；无人员列时 Persons 为空。
+// 请求带 automatic_fields=true，额外回带记录创建时间（CreatedTime），供消费方按插入时间过滤。
 // fieldTypes 用于按列类型解码单元格，必须传 ListFields 同一张表的结果。
 func (c *Client) ListRecordsByID(ctx context.Context, t Table, fieldTypes map[string]int) (map[string]ExistingRecord, error) {
 	out := make(map[string]ExistingRecord)
 	pageToken := ""
 	for {
 		builder := larkbitablesdk.NewListAppTableRecordReqBuilder().
-			AppToken(t.AppToken).TableId(t.TableID).PageSize(listPageSize)
+			AppToken(t.AppToken).TableId(t.TableID).PageSize(listPageSize).
+			AutomaticFields(true)
 		if pageToken != "" {
 			builder = builder.PageToken(pageToken)
 		}
@@ -202,9 +204,10 @@ func (c *Client) ListRecordsByID(ctx context.Context, t Table, fieldTypes map[st
 				}
 			}
 			out[id] = ExistingRecord{
-				RecordID: id,
-				Fields:   row,
-				Persons:  persons,
+				RecordID:    id,
+				Fields:      row,
+				Persons:     persons,
+				CreatedTime: createdTimeMillis(larkcore.Int64Value(rec.CreatedTime)),
 			}
 		}
 		time.Sleep(throttle)
@@ -263,8 +266,17 @@ func (c *Client) BatchGetByIDs(ctx context.Context, t Table, recordIDs []string,
 	return out, absent, nil
 }
 
+// createdTimeMillis 把飞书回带的记录创建时间归一为毫秒时间戳。飞书文档虽标称毫秒，
+// 但不同接口/历史数据存在秒级值与毫秒级值并存的情况，故此处按量级判定：
+// 小于 1e12（约公元 2001 年）的视为秒，乘以 1000 归一到毫秒；其余原样返回。0 保持 0。
+func createdTimeMillis(v int64) int64 {
+	if v > 0 && v < 1e12 {
+		return v * 1000
+	}
+	return v
+}
+
 // userIDType 返回下发飞书的 user_id_type 查询参数值，空则兜底 open_id。
-// userIDType 返回配置的 user_id_type 及是否应下发该查询参数。
 // 该参数仅在写入人员字段时用于指定用户 ID 的解析格式；未配置（空串）时返回 ok=false，
 // 下发处应省略 UserIdType，避免空串触发飞书 99992402 field validation failed。
 func (c *Client) userIDType() (string, bool) {

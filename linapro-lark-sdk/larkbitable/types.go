@@ -46,10 +46,15 @@ type WriteRow map[string]any
 // （每个含 id/name/en_name/email/avatar_url）。需要 open_id、email 等非姓名信息，
 // 或想做 id 漂移比对（同名换人、离职复入导致 open_id 变更）的消费方读 Persons；
 // 只做文本比对的消费方读 Fields 即可。没有人员列时 Persons 为 nil。
+// CreatedTime 是记录创建时间的原始毫秒时间戳（ListRecordsByID 请求 automatic_fields=true 时由飞书
+// 回带，见 client.ListRecordsByID）；未请求自动字段或字段缺失时为 0。
+// 语义保留原始值不做归一：消费方按需自行换算（例如「最近 N 个月插入」的窗口过滤）。
 type ExistingRecord struct {
 	RecordID string
 	Fields   Row
 	Persons  map[string][]*larkbitablesdk.Person
+	// CreatedTime 记录创建时间（毫秒）；未取到自动字段时为 0。
+	CreatedTime int64
 }
 
 // CreateOp 表示一条待新建的记录。
