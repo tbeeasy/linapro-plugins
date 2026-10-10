@@ -10,9 +10,12 @@ package job
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"lina-plugin-linapro-recruit-pipeline/backend/config"
 	lark "linapro-lark-sdk/larkbitable"
@@ -256,5 +259,226 @@ func TestCollectOwnerBackfill_NormalizesApplicationID(t *testing.T) {
 
 	if len(updates) != 1 || len(updates[0].Persons[ownerCol]) != 1 || updates[0].Persons[ownerCol][0] != "ou_101" {
 		t.Fatalf("科学计数法 applicationId 应归一化后命中回填, got %v", updates)
+	}
+}
+
+// TestCollectPassDateBackfill 验证通过日期回填的写入规则：
+//   - accept + 「通过日期」空 → 直接写（值为毫秒串）；
+//   - id 未命中 acceptMap / applicationId 空 → 不产出；
+//   - 已有值 < 新值 → 更新为更大值；
+//   - 已有值 ≥ 新值 → 不产出（幂等）；
+//   - 已有值无法解析 → 按空照写。
+func TestCollectPassDateBackfill(t *testing.T) {
+	const appCol, passCol = "applicationId", "通过日期"
+	records := map[string]lark.ExistingRecord{
+		"rec1": {Fields: lark.Row{appCol: "101", passCol: ""}},              // 空 + 命中 → 写
+		"rec2": {Fields: lark.Row{appCol: "102", passCol: "1000000000000"}}, // 已有值 < 新值 → 更新
+		"rec3": {Fields: lark.Row{appCol: "103", passCol: "9000000000000"}}, // 已有值 > 新值 → 幂等跳过
+		"rec4": {Fields: lark.Row{appCol: "104", passCol: "2000000000000"}}, // 已有值 == 新值 → 幂等跳过
+		"rec5": {Fields: lark.Row{appCol: "105", passCol: ""}},              // 命中但……见下（未命中 acceptMap）
+		"rec6": {Fields: lark.Row{appCol: "", passCol: ""}},                 // 无 applicationId → 跳过
+		"rec7": {Fields: lark.Row{appCol: "107", passCol: "无法解析"}},          // 已有值不可解析 → 按空照写
+	}
+	acceptMap := map[string]int64{
+		"101": 1787205886000,
+		"102": 2000000000000,
+		"103": 2000000000000,
+		"104": 2000000000000,
+		"107": 1787205886000,
+		// 105 不在 acceptMap → rec5 不产出
+	}
+
+	updates := collectPassDateBackfill(records, acceptMap, appCol, passCol)
+
+	got := make(map[string]string, len(updates))
+	for _, u := range updates {
+		got[u.RecordID] = asString(u.Fields[passCol])
+	}
+	if len(updates) != 3 {
+		t.Fatalf("期望 3 条（rec1/rec2/rec7）, got %d (%v)", len(updates), got)
+	}
+	if got["rec1"] != "1787205886000" {
+		t.Fatalf("rec1 空应写毫秒串, got=%q", got["rec1"])
+	}
+	if got["rec2"] != "2000000000000" {
+		t.Fatalf("rec2 更小值应更新为更大值, got=%q", got["rec2"])
+	}
+	if got["rec7"] != "1787205886000" {
+		t.Fatalf("rec7 不可解析已有值应按空照写, got=%q", got["rec7"])
+	}
+	for _, skip := range []string{"rec3", "rec4", "rec5", "rec6"} {
+		if _, ok := got[skip]; ok {
+			t.Fatalf("%s 不应产出 UpdateOp: %v", skip, got)
+		}
+	}
+}
+
+// TestCollectPassDateBackfill_EmptyAcceptMap 验证 acceptMap 为空时直接返回 nil，不产出任何回填。
+func TestCollectPassDateBackfill_EmptyAcceptMap(t *testing.T) {
+	records := map[string]lark.ExistingRecord{
+		"rec1": {Fields: lark.Row{"applicationId": "101", "通过日期": ""}},
+	}
+	if updates := collectPassDateBackfill(records, nil, "applicationId", "通过日期"); updates != nil {
+		t.Fatalf("acceptMap 为空应返回 nil, got %v", updates)
+	}
+}
+
+// TestMergeBackfillUpdates 验证归属者路与通过日期路按 recordID 合并：
+//   - 同一 recordID 同时命中两路 → 合并为一条，Fields（通过日期）与 Persons（归属者）都在；
+//   - 仅一路命中的 recordID 各自保留；
+//   - 仅一路非空时直接返回该路（不合并）。
+func TestMergeBackfillUpdates(t *testing.T) {
+	const ownerCol, passCol = "简历归属者", "通过日期"
+	ownerUpdates := []lark.UpdateOp{
+		{RecordID: "rec1", Fields: lark.WriteRow{}, Persons: map[string][]string{ownerCol: {"ou_101"}}}, // 与通过日期路同 recordID
+		{RecordID: "rec2", Fields: lark.WriteRow{}, Persons: map[string][]string{ownerCol: {"ou_102"}}}, // 仅归属者
+	}
+	passUpdates := []lark.UpdateOp{
+		{RecordID: "rec1", Fields: lark.WriteRow{passCol: "1787205886000"}}, // 与归属者路同 recordID → 合并
+		{RecordID: "rec3", Fields: lark.WriteRow{passCol: "1787205886000"}}, // 仅通过日期
+	}
+
+	merged := mergeBackfillUpdates(ownerUpdates, passUpdates)
+
+	if len(merged) != 3 {
+		t.Fatalf("期望合并为 3 条（rec1 合并 + rec2 + rec3）, got %d (%v)", len(merged), merged)
+	}
+	byID := make(map[string]lark.UpdateOp, len(merged))
+	for _, u := range merged {
+		byID[u.RecordID] = u
+	}
+	// rec1：Fields 与 Persons 都在。
+	rec1 := byID["rec1"]
+	if asString(rec1.Fields[passCol]) != "1787205886000" {
+		t.Fatalf("rec1 合并后应含通过日期 Fields, got=%v", rec1.Fields)
+	}
+	if len(rec1.Persons[ownerCol]) != 1 || rec1.Persons[ownerCol][0] != "ou_101" {
+		t.Fatalf("rec1 合并后应含归属者 Persons, got=%v", rec1.Persons)
+	}
+	// rec2：仅 Persons。
+	if len(byID["rec2"].Persons[ownerCol]) != 1 {
+		t.Fatalf("rec2 应保留归属者 Persons, got=%v", byID["rec2"])
+	}
+	// rec3：仅 Fields。
+	if asString(byID["rec3"].Fields[passCol]) != "1787205886000" {
+		t.Fatalf("rec3 应保留通过日期 Fields, got=%v", byID["rec3"])
+	}
+}
+
+// TestMergeBackfillUpdates_SinglePath 验证仅一路非空时直接返回该路，不做合并。
+func TestMergeBackfillUpdates_SinglePath(t *testing.T) {
+	owner := []lark.UpdateOp{{RecordID: "rec1", Persons: map[string][]string{"简历归属者": {"ou_1"}}}}
+	if got := mergeBackfillUpdates(owner, nil); len(got) != 1 || got[0].RecordID != "rec1" {
+		t.Fatalf("仅归属者路应原样返回, got=%v", got)
+	}
+	pass := []lark.UpdateOp{{RecordID: "rec2", Fields: lark.WriteRow{"通过日期": "1"}}}
+	if got := mergeBackfillUpdates(nil, pass); len(got) != 1 || got[0].RecordID != "rec2" {
+		t.Fatalf("仅通过日期路应原样返回, got=%v", got)
+	}
+}
+
+// TestCollectAcceptTimes_MaxRecommendedTime 验证 collectAcceptTimes 对 Moka get_handle_Result 结果：
+//   - 仅取 handleResult==accept 且 recommendedTime>0；reject / 零值被过滤；
+//   - 同一 applicationId 多条 accept 取最大（最新）recommendedTime；
+//   - 请求体透传传入的 applicationIdList。
+func TestCollectAcceptTimes_MaxRecommendedTime(t *testing.T) {
+	const resp = `{"code":0,"msg":"成功","data":[
+		{"applicationId":101,"handleResult":"accept","recommendedTime":1000},
+		{"applicationId":101,"handleResult":"accept","recommendedTime":3000},
+		{"applicationId":101,"handleResult":"accept","recommendedTime":2000},
+		{"applicationId":102,"handleResult":"reject","recommendedTime":5000},
+		{"applicationId":103,"handleResult":"accept","recommendedTime":0}
+	]}`
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api-platform/candidate/v1/get_handle_Result" {
+			http.NotFound(w, r)
+			return
+		}
+		gotBody, _ = io.ReadAll(r.Body)
+		_, _ = w.Write([]byte(resp))
+	}))
+	t.Cleanup(srv.Close)
+
+	got := collectAcceptTimes(context.Background(), newOwnerMokaClient(srv.URL), []int64{101, 102, 103})
+
+	if len(got) != 1 {
+		t.Fatalf("仅 101 有有效 accept, 期望 1 条, got %d (%v)", len(got), got)
+	}
+	if got["101"] != 3000 {
+		t.Fatalf("101 应取最大 recommendedTime=3000, got=%d", got["101"])
+	}
+	// 请求体应含 101/102/103。
+	body := string(gotBody)
+	for _, want := range []string{"101", "102", "103"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("请求体缺 applicationId %s: %q", want, body)
+		}
+	}
+}
+
+// TestCollectAcceptTimes_EmptyIDs 验证 applicationId 列表为空时不发起请求直接返回 nil。
+func TestCollectAcceptTimes_EmptyIDs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Errorf("applicationId 列表为空时不应发起 GetHandleResult 调用")
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	if got := collectAcceptTimes(context.Background(), newOwnerMokaClient(srv.URL), nil); got != nil {
+		t.Fatalf("空列表应返回 nil, got %v", got)
+	}
+}
+
+// TestCollectAcceptTimes_ErrorDegrades 验证 get_handle_Result 失败时返回 nil（降级为只做归属者回填）。
+func TestCollectAcceptTimes_ErrorDegrades(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	if got := collectAcceptTimes(context.Background(), newOwnerMokaClient(srv.URL), []int64{101}); got != nil {
+		t.Fatalf("失败应降级返回 nil, got %v", got)
+	}
+}
+
+// TestMergeAcceptQueryIDs 验证通过日期回填的查询集合 = 本轮候选人 ∪ 回溯窗口内「插入且通过日期为空」的记录：
+//   - 本轮候选人 applicationId 全部纳入，且与回溯集合去重；
+//   - 回溯只收「创建时间落在最近 N 个月内」且「通过日期列为空」的记录；
+//   - 创建时间缺失（0）/ 超出窗口 / 通过日期已填 / 无 applicationId 的记录跳过；
+//   - 已填通过日期的记录即使在本轮候选集合中仍保留（本轮候选优先纳入，不受回溯过滤影响）。
+func TestMergeAcceptQueryIDs(t *testing.T) {
+	const appCol, passCol = "applicationId", "通过日期"
+	now := time.Now()
+	recent := now.AddDate(0, 0, -10).UnixMilli() // 窗口内
+	older := now.AddDate(0, -3, 0).UnixMilli()   // 超出窗口（3 个月前）
+	apps := []mokabackend.EhrApplication{
+		{BasicInfo: mokabackend.ApplicationBasicInfo{ApplicationID: 1001}},
+		{BasicInfo: mokabackend.ApplicationBasicInfo{ApplicationID: 1001}}, // 去重
+		{BasicInfo: mokabackend.ApplicationBasicInfo{ApplicationID: 0}},    // 无效 id
+	}
+	records := map[string]lark.ExistingRecord{
+		// 窗口内、通过日期空 → 纳入
+		"rec1": {Fields: lark.Row{appCol: "2001", passCol: ""}, CreatedTime: recent},
+		// 窗口内、通过日期已填 → 跳过
+		"rec2": {Fields: lark.Row{appCol: "2002", passCol: "1787205886000"}, CreatedTime: recent},
+		// 超出窗口 → 跳过
+		"rec3": {Fields: lark.Row{appCol: "2003", passCol: ""}, CreatedTime: older},
+		// 创建时间缺失 → 跳过
+		"rec4": {Fields: lark.Row{appCol: "2004", passCol: ""}},
+		// 窗口内、通过日期空、与候选集合同 id → 去重
+		"rec5": {Fields: lark.Row{appCol: "1001", passCol: ""}, CreatedTime: recent},
+		// 窗口内、通过日期空、无 applicationId → 跳过
+		"rec6": {Fields: lark.Row{appCol: "", passCol: ""}, CreatedTime: recent},
+	}
+
+	got := mergeAcceptQueryIDs(context.Background(), records, appCol, passCol, apps, now)
+
+	want := map[int64]bool{1001: true, 2001: true}
+	if len(got) != len(want) {
+		t.Fatalf("期望 %d 个 applicationId %v, got %v", len(want), want, got)
+	}
+	for _, id := range got {
+		if !want[id] {
+			t.Fatalf("出现非预期 applicationId=%d, got %v", id, got)
+		}
 	}
 }

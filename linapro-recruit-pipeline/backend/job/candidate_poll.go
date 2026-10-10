@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"lina-core/pkg/logger"
+	"maps"
 	"net/http"
 	"path"
 	"strconv"
@@ -75,7 +76,7 @@ func RunCandidatePoll(ctx context.Context, cfg *config.Config, mokaClient *mokab
 	}
 	index := buildCandidateIndex(records, appIDCol)
 
-	logger.Infof(ctx, "candidate-poll: Bitable 现有 %d 条记录", len(index))
+	logger.Infof(ctx, "candidate-poll: 简历评估池Bitable 现有 %d 条记录", len(index))
 
 	// 4.1 加载 owner 报表映射（需求1.4·归属者回填）。报表非实时（5–20 分钟刷新）+ skip-once 去重，
 	// 故归属者取值走「报表 + 回填」：一次报表拉取同时喂插入路径与回填路径。
@@ -119,12 +120,14 @@ func RunCandidatePoll(ctx context.Context, cfg *config.Config, mokaClient *mokab
 		logger.Infof(ctx, "candidate-poll: 命中单周期上限 %d, 本轮顺延 %d 个新候选人至下一轮", maxPerCycle, deferred)
 	}
 
-	// 6. 回填路径（需求1.4）：遍历已加载的候选表全表 records，对「简历归属者」列为空且
-	// ownerMap 能解析出工号的行收集进一次 BatchUpdate 补齐。只补空、不覆写，复用已加载的
-	// fieldTypes/records/lark client，不重复扫表、不新建定时任务。
-	backfilled := backfillOwners(ctx, cfg, lc, table, records, ownerMap, appIDCol, fieldTypes, resolveOwner)
+	// 6. 回填路径：遍历已加载的候选表全表 records，编排两条回填——
+	//   ·归属者（需求1.4）：「简历归属者」列为空且 ownerMap 能解析出工号的行补齐；
+	//   ·通过日期：本轮候选人经 Moka get_handle_Result 命中 accept 的行，把 recommendedTime 回填「通过日期」。
+	// 两路可能命中同一 recordID，故各产出纯逻辑 UpdateOp 后按 recordID 合并，只发一次 BatchUpdate。
+	// 复用已加载的 fieldTypes/records/lark client，不重复扫表、不新建定时任务。
+	backfilled := backfillRowFields(ctx, cfg, mokaClient, lc, table, records, applications, ownerMap, appIDCol, fieldTypes, resolveOwner, now)
 
-	logger.Infof(ctx, "candidate-poll: 完成, 新建=%d, 跳过=%d, 归属者回填=%d", created, skipped, backfilled)
+	logger.Infof(ctx, "candidate-poll: 完成, 新建=%d, 跳过=%d, 回填行数=%d", created, skipped, backfilled)
 	return nil
 }
 
@@ -195,35 +198,160 @@ func loadOwnerMap(ctx context.Context, mokaClient *mokabackend.Client, cfg *conf
 	return ownerMap
 }
 
-// backfillOwners 遍历候选表全表 records，对「简历归属者」列为空且 ownerMap 有工号的行补齐（需求1.4）。
-// 只补空、不覆写：records 的人员列已按 fieldTypes 解码为姓名，空串即视为未写。
-// resume_owner 列未配置或无可补行时返回 0，不发起 BatchUpdate。返回实际补齐的行数。
-func backfillOwners(
+// backfillRowFields 遍历候选表全表 records，编排两条回填路径并合并为一次 BatchUpdate：
+//   - 归属者（需求1.4）：collectOwnerBackfill 对「简历归属者」列为空且 ownerMap 有工号的行补齐（经 Persons 旁路）；
+//   - 通过日期：对本轮候选人 + 候选表中最近 N 个月内插入且通过日期为空的记录调 Moka get_handle_Result，
+//     命中 accept 的行把 recommendedTime 回填「通过日期」列。
+//
+// 两路可能命中同一 recordID，故各产出纯逻辑 UpdateOp 后按 recordID 合并（并集 Fields 与 Persons），
+// 只发一次 BatchUpdate。get_handle_Result 失败仅记 warn 并退化为只做归属者回填，不阻断轮询。
+// 复用已加载的 fieldTypes/records/lark client。now 为轮询开始时刻，用于计算通过日期回填的时间回溯窗口。
+// 返回实际写入的行数。
+func backfillRowFields(
 	ctx context.Context,
 	cfg *config.Config,
+	mokaClient *mokabackend.Client,
 	lc *lark.Client,
 	table lark.Table,
 	records map[string]lark.ExistingRecord,
+	applications []mokabackend.EhrApplication,
 	ownerMap map[string]string,
 	appIDCol string,
 	fieldTypes map[string]int,
 	resolveOwner func(employeeNos []string) []string,
+	now time.Time,
 ) int {
-	ownerCol := cfg.FieldMapping[config.FieldKeyResumeOwner]
-	if ownerCol == "" || len(ownerMap) == 0 {
-		return 0
+	// 归属者路：只补空、不覆写；resume_owner 未配置或 ownerMap 空时该路产出为空。
+	var ownerUpdates []lark.UpdateOp
+	if ownerCol := cfg.FieldMapping[config.FieldKeyResumeOwner]; ownerCol != "" && len(ownerMap) > 0 {
+		ownerUpdates = collectOwnerBackfill(records, ownerMap, appIDCol, ownerCol, resolveOwner)
 	}
 
-	updates := collectOwnerBackfill(records, ownerMap, appIDCol, ownerCol, resolveOwner)
+	// 通过日期路：pass_date 未配置则跳过。
+	// 候选 applicationId 集合 = 本轮从 Moka 拉到的候选人 ∪ 候选表中「最近 N 个月内插入且通过日期为空」
+	// 的记录：通过日期可能在申请后 1 个月才产生，只查本轮窗口内的申请会永远漏掉它们（申请当天不在
+	// accept 状态、之后不再进入轮询窗口），故用时间回溯把这类历史申请重新纳入 get_handle_Result。
+	var passUpdates []lark.UpdateOp
+	if passCol := cfg.FieldMapping[config.FieldKeyPassDate]; passCol != "" {
+		appIDs := mergeAcceptQueryIDs(ctx, records, appIDCol, passCol, applications, now)
+		if acceptMap := collectAcceptTimes(ctx, mokaClient, appIDs); len(acceptMap) > 0 {
+			passUpdates = collectPassDateBackfill(records, acceptMap, appIDCol, passCol)
+		}
+	}
+
+	updates := mergeBackfillUpdates(ownerUpdates, passUpdates)
 	if len(updates) == 0 {
 		return 0
 	}
 
+	// 类型化后一次写入：通过日期列（TypeDateTime）的毫秒串在此转 int64；人员列走 Persons 旁路不受影响。
+	typeUpdateFields(updates, fieldTypes)
 	if err := lc.BatchUpdate(ctx, table, updates, fieldTypes); err != nil {
-		logger.Errorf(ctx, "candidate-poll: 归属者回填 BatchUpdate 失败: %v", err)
+		logger.Errorf(ctx, "candidate-poll: 回填 BatchUpdate 失败: %v", err)
 		return 0
 	}
 	return len(updates)
+}
+
+// mergeAcceptQueryIDs 汇总通过日期回填的 get_handle_Result 查询集合（去重后的 applicationId）：
+//   - 本轮从 Moka 拉到的全部候选人 applicationId（走 EhrApplication.BasicInfo.ApplicationID）；
+//   - 候选表中「最近 N 个月（passDateLookbackMonths）内插入、且通过日期列为空」的记录 applicationId。
+//
+// 后者是为「通过可能发生在申请后一个月」而设的回溯：这类申请的通过日期产生时早已不在轮询窗口内，
+// 仅靠本轮候选会永远漏回填。插入时间取记录的飞书创建时间（CreatedTime，ListRecordsByID 已带
+// automatic_fields），创建时间缺失（0）或早于窗口的记录跳过。now 为轮询开始时刻，窗口即 [now-N月, now]。
+func mergeAcceptQueryIDs(
+	ctx context.Context,
+	records map[string]lark.ExistingRecord,
+	appIDCol, passCol string,
+	applications []mokabackend.EhrApplication,
+	now time.Time,
+) []int64 {
+	seen := make(map[int64]struct{}, len(applications))
+	ids := make([]int64, 0, len(applications))
+
+	add := func(id int64) {
+		if id <= 0 {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+
+	// 本轮候选人。
+	for _, app := range applications {
+		add(app.BasicInfo.ApplicationID)
+	}
+
+	// 回溯：最近 N 个月内插入且通过日期为空的记录。
+	cutoff := passDateLookbackCutoff(now)
+	for _, rec := range records {
+		if rec.CreatedTime <= 0 || rec.CreatedTime < cutoff {
+			continue
+		}
+		if strings.TrimSpace(rec.Fields[passCol]) != "" {
+			continue
+		}
+		appKey := normalizeID(rec.Fields[appIDCol])
+		if appKey == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(appKey, 10, 64)
+		if err != nil {
+			logger.Warningf(ctx, "candidate-poll: 通过日期回溯跳过非法 applicationId=%q", appKey)
+			continue
+		}
+		add(id)
+	}
+
+	return ids
+}
+
+// passDateLookbackMonths 是通过日期回填的时间回溯窗口（自然月）。通过可能在申请后约一个月才产生，
+// 该值须覆盖「申请 → 通过」的最长间隔，否则超期的申请其通过日期永远不补。暂定 2 个月。
+const passDateLookbackMonths = 2
+
+// passDateLookbackCutoff 返回通过日期回填的时间回溯下界（毫秒）：now 往前推 passDateLookbackMonths 个月。
+// 用 AddDate 按自然月回溯（而非固定天数），跨月天数差异下语义与「最近 N 个月」一致。
+func passDateLookbackCutoff(now time.Time) int64 {
+	return now.AddDate(0, -passDateLookbackMonths, 0).UnixMilli()
+}
+
+// collectAcceptTimes 对给定 applicationId 列表调 Moka get_handle_Result（分批），构建
+// applicationId（字符串）→ 最新推荐时间 映射。仅取 handleResult==accept 且 recommendedTime>0 的
+// 处理结果；同一申请多条 accept 时取最大（最新）recommendedTime。
+// 任一批次调用失败即记 warn 并返回 nil，由调用方退化为只做归属者回填，不阻断轮询。
+func collectAcceptTimes(ctx context.Context, mokaClient *mokabackend.Client, appIDs []int64) map[string]int64 {
+	if len(appIDs) == 0 {
+		return nil
+	}
+
+	const batchSize = 50
+	acceptMap := make(map[string]int64)
+	for start := 0; start < len(appIDs); start += batchSize {
+		end := start + batchSize
+		if end > len(appIDs) {
+			end = len(appIDs)
+		}
+		results, err := mokaClient.GetHandleResult(ctx, appIDs[start:end])
+		if err != nil {
+			logger.Warningf(ctx, "candidate-poll: GetHandleResult 失败, 本轮跳过通过日期回填: %v", err)
+			return nil
+		}
+		for _, r := range results {
+			if r.HandleResult != mokabackend.HandleResultAccept || r.RecommendedTime <= 0 {
+				continue
+			}
+			key := strconv.FormatInt(r.ApplicationID, 10)
+			if cur, ok := acceptMap[key]; !ok || r.RecommendedTime > cur {
+				acceptMap[key] = r.RecommendedTime
+			}
+		}
+	}
+	return acceptMap
 }
 
 // collectOwnerBackfill 是回填路径的纯逻辑（需求1.4）：遍历候选表全表 records，收集「简历归属者」列
@@ -265,6 +393,90 @@ func collectOwnerBackfill(
 		})
 	}
 	return updates
+}
+
+// collectPassDateBackfill 是通过日期回填的纯逻辑：遍历候选表全表 records，对 applicationId 命中 acceptMap
+// 的行，按写入规则产出「通过日期」列的 UpdateOp。写入规则：
+//   - 当前列为空 → 直接写；
+//   - 当前列非空且能解析出毫秒 curMs → 仅当新值 newMs > curMs（更新为更新的时间）才写；相等/更小跳过（幂等）；
+//   - 当前列非空但无法解析 → 按「空」处理照写。
+//
+// 值以毫秒字符串写入 Fields，交由 typeUpdateFields 按列类型（TypeDateTime）转 int64 毫秒。
+func collectPassDateBackfill(
+	records map[string]lark.ExistingRecord,
+	acceptMap map[string]int64,
+	appIDCol, passCol string,
+) []lark.UpdateOp {
+	if len(acceptMap) == 0 {
+		return nil
+	}
+	var updates []lark.UpdateOp
+	for recordID, rec := range records {
+		appKey := normalizeID(rec.Fields[appIDCol])
+		if appKey == "" {
+			continue
+		}
+		newMs, ok := acceptMap[appKey]
+		if !ok {
+			continue
+		}
+		// 非空且可解析时，仅当新值更大才更新；相等/更小跳过（幂等）。解析失败按「空」照写。
+		if cur := strings.TrimSpace(rec.Fields[passCol]); cur != "" {
+			if curMs, ok := lark.ParseEpochMillisUTC(cur); ok && newMs <= curMs {
+				continue
+			}
+		}
+		updates = append(updates, lark.UpdateOp{
+			RecordID: recordID,
+			Fields:   lark.WriteRow{passCol: strconv.FormatInt(newMs, 10)},
+		})
+	}
+	return updates
+}
+
+// mergeBackfillUpdates 将归属者路与通过日期路的 UpdateOp 按 recordID 合并为一条，避免同一 recordID
+// 被更新两次。合并同时并集 Fields（maps.Copy）与 Persons（逐键复制）——两路分别写日期列与人员列，
+// 列不冲突。仅一路有值时直接返回该路（无需合并）。
+func mergeBackfillUpdates(ownerUpdates, passUpdates []lark.UpdateOp) []lark.UpdateOp {
+	if len(ownerUpdates) == 0 {
+		return passUpdates
+	}
+	if len(passUpdates) == 0 {
+		return ownerUpdates
+	}
+	index := make(map[string]int, len(ownerUpdates)+len(passUpdates))
+	merged := make([]lark.UpdateOp, 0, len(ownerUpdates)+len(passUpdates))
+	add := func(u lark.UpdateOp) {
+		i, ok := index[u.RecordID]
+		if !ok {
+			index[u.RecordID] = len(merged)
+			merged = append(merged, u)
+			return
+		}
+		// 并集 Fields。
+		if len(u.Fields) > 0 {
+			if merged[i].Fields == nil {
+				merged[i].Fields = lark.WriteRow{}
+			}
+			maps.Copy(merged[i].Fields, u.Fields)
+		}
+		// 并集 Persons（列名 → open_id 集合）。
+		if len(u.Persons) > 0 {
+			if merged[i].Persons == nil {
+				merged[i].Persons = make(map[string][]string, len(u.Persons))
+			}
+			for col, ids := range u.Persons {
+				merged[i].Persons[col] = ids
+			}
+		}
+	}
+	for _, u := range ownerUpdates {
+		add(u)
+	}
+	for _, u := range passUpdates {
+		add(u)
+	}
+	return merged
 }
 
 // processCandidate 处理单个候选人：获取简历 → 下载附件 → 写 Bitable → 入队。

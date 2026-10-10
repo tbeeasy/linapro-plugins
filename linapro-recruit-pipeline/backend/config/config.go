@@ -159,6 +159,9 @@ const (
 	// 该列为飞书人员字段（TypeUser），不接受纯字符串，故解析结果经 CreateOp/UpdateOp.Persons
 	// 旁路交给共享库序列化，不进 Fields 文本列。
 	FieldKeyResumeOwner = "resume_owner" // 简历归属者人员列（工号→open_id）
+	// FieldKeyPassDate 是「通过日期」列。候选人被处理为 accept 时，把 Moka get_handle_Result 的
+	// recommendedTime（推荐时间）回填至此列；该列为飞书日期字段（TypeDateTime）。
+	FieldKeyPassDate = "pass_date" // 通过日期列（accept 时回填 recommendedTime）
 	// 需求2 面试状态表字段键。
 	FieldKeyApplicationID  = "applicationId"   // applicationId 字段，与轮次组合为唯一键
 	FieldKeyInterviewRound = "interview_round" // 面试轮次名称（roundName），与 applicationId 组合为唯一键
@@ -189,6 +192,7 @@ var defaultFieldMapping = map[string]string{
 	FieldKeyResume:         "简历内容",          // 简历纯文本，值由 Moka resumeContent 接口注入
 	FieldKeyResumeFile:     "简历附件",          // 简历原文件附件，值由 basicInfo.resumeUrl 下载后转存飞书注入
 	FieldKeyResumeOwner:    "简历归属者",         // 简历归属者人员列，值由 owner 报表 HR 邮箱经 owner_email_mapping 转工号、再经 empcap 解析为 open_id 注入
+	FieldKeyPassDate:       "通过日期",          // 通过日期列，值由 Moka get_handle_Result 的 recommendedTime（accept 时）回填
 	FieldKeyApplicationID:  "applicationId", // 需求2：Moka applicationId，与 interview_round 组合为面试状态表唯一键
 	FieldKeyInterviewRound: "面试轮次",          // 需求2：面试轮次名称（roundName），与 applicationId 组合为唯一键
 	FieldKeyCandidateName:  "姓名",            // 需求2：候选人姓名（basicInfo.name）
