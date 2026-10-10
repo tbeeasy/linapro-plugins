@@ -39,7 +39,7 @@ license: Apache-2.0
 
 # 插件国际化配置。该配置与宿主 i18n 配置结构保持一致；启用后需提供对应语言资源。
 i18n:
-  enabled: true
+  enabled: false
   default: zh-CN
   locales:
     - locale: en-US
