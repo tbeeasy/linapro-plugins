@@ -15,7 +15,11 @@ const (
 	ehrApplicationsPath      = "/api-platform/v2/data/ehrApplications"
 	interviewInformationPath = "/api-platform/v1/interview/interview-information"
 	moveApplicationStagePath = "/api-platform/v1/applications/move_application_stage"
+	getHandleResultPath      = "/api-platform/candidate/v1/get_handle_Result"
 )
+
+// HandleResultAccept 是 get_handle_Result 中「通过」的处理结果枚举值。
+const HandleResultAccept = "accept"
 
 // InterviewType 是面试方式的命名类型，取自 Moka `interviewInfo.interviewType`
 // 字符串枚举。用于集中管理判定「是否视频面试」的枚举语义，避免硬编码字符串。
@@ -302,6 +306,63 @@ func (c *Client) GetInterviewInformation(ctx context.Context, applicationIDs []i
 
 	// 打印返回值
 	logger.Debugf(ctx, "moka-recruit: GetInterviewInformation 格式化之后请求返回值 %+v", env.Data)
+
+	return env.Data, nil
+}
+
+// HandleResult 是 get_handle_Result 接口返回的单条处理结果。
+// 同一 applicationId 可能有多条（多个处理人分别 accept/reject）。
+// RecommendedTime 为推荐时间（Unix 毫秒时间戳），accept 场景回填飞书「通过日期」列。
+type HandleResult struct {
+	Name          string `json:"name"`          // 候选人姓名
+	ApplicationID int64  `json:"applicationId"` // 申请 ID
+	CandidateID   int64  `json:"candidateId"`   // 候选人 ID
+	Email         string `json:"email"`         // 处理人邮箱
+	HandleResult  string `json:"handleResult"`  // 处理结果（accept/reject）
+	// HandleTime 生产实测为 "2026-09-20 21:51:43" 形式的日期字符串（文档标注为时间戳），
+	// 故用 flexNumberString 容错解析，避免整体 Unmarshal 失败。当前仅诊断用，不参与回填。
+	HandleTime      flexNumberString `json:"handleTime"`      // 处理时间（字符串日期，如 "2026-09-20 21:51:43"）
+	StageID         int64            `json:"stageId"`         // 处理所在阶段 ID
+	StageType       int              `json:"stageType"`       // 处理所在阶段类型
+	RecommendedTime int64            `json:"recommendedTime"` // 推荐时间（Unix 毫秒时间戳）
+}
+
+type getHandleResultEnvelope struct {
+	Code int            `json:"code"`
+	Msg  string         `json:"msg"`
+	Data []HandleResult `json:"data"`
+}
+
+// GetHandleResult 查询给定 application 列表的处理结果，用于取回 accept/reject 与推荐时间。
+// 该接口 code=0 为成功（与 GetInterviewInformation 一致）。applicationIDs 为空时直接返回空切片，不发请求。
+func (c *Client) GetHandleResult(ctx context.Context, applicationIDs []int64) ([]HandleResult, error) {
+	if len(applicationIDs) == 0 {
+		return nil, nil
+	}
+	body, err := json.Marshal(map[string]any{
+		"applicationIdList": applicationIDs,
+	})
+	if err != nil {
+		return nil, gerror.Wrap(err, "moka-recruit: 序列化 get_handle_Result 请求体失败")
+	}
+
+	logger.Debugf(ctx, "moka-recruit: GetHandleResult 请求参数 %s", string(body))
+
+	raw, err := c.PostJSON(ctx, getHandleResultPath, body)
+	if err != nil {
+		return nil, err
+	}
+
+	// 打印原始返回值
+	logger.Debugf(ctx, "moka-recruit: GetHandleResult 原始请求返回值 %s", string(raw))
+
+	var env getHandleResultEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, gerror.Wrapf(err, "moka-recruit: 解析 get_handle_Result 响应失败: %s", truncate(string(raw), 512))
+	}
+	if env.Code != 0 {
+		return nil, gerror.Newf("moka-recruit: get_handle_Result 接口返回 code=%d msg=%q", env.Code, env.Msg)
+	}
 
 	return env.Data, nil
 }

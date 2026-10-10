@@ -201,6 +201,74 @@ func TestGetInterviewInformation_EmptyIDsNoRequest(t *testing.T) {
 	}
 }
 
+// TestGetHandleResult_SuccessCodeZero 验证 get_handle_Result 请求体透传 applicationIdList，
+// 并从 data 解析出 accept 处理结果与推荐时间（code=0 为成功）。
+// handleTime 覆盖生产实测的字符串日期形态（文档另标为时间戳数字），确认不再导致整体解析失败。
+func TestGetHandleResult_SuccessCodeZero(t *testing.T) {
+	const resp = `{"code":0,"msg":"成功","data":[{"name":"张三","applicationId":820732412,"candidateId":111,"email":"hr@example.com","handleResult":"accept","handleTime":"2026-09-20 21:51:43","stageId":105019,"stageType":100,"recommendedTime":1787205886000},{"name":"张三","applicationId":820732412,"handleResult":"reject","handleTime":1787000000000,"recommendedTime":1787100000000}]}`
+	var gotPath string
+	var gotBody []byte
+	c := newTestServer(t, http.StatusOK, resp, func(p string, b []byte) { gotPath = p; gotBody = b })
+
+	results, err := c.GetHandleResult(context.Background(), []int64{820732412})
+	if err != nil {
+		t.Fatalf("GetHandleResult: %v", err)
+	}
+	if gotPath != "/api-platform/candidate/v1/get_handle_Result" {
+		t.Fatalf("path: got %q", gotPath)
+	}
+	if string(gotBody) != `{"applicationIdList":[820732412]}` {
+		t.Fatalf("request body: got %q", string(gotBody))
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].HandleResult != HandleResultAccept || results[0].RecommendedTime != 1787205886000 {
+		t.Fatalf("accept result mismatch: %+v", results[0])
+	}
+	if results[0].ApplicationID != 820732412 {
+		t.Fatalf("applicationId: got %d", results[0].ApplicationID)
+	}
+	// handleTime 字符串形态原样保留，数字形态亦兼容。
+	if got := results[0].HandleTime.String(); got != "2026-09-20 21:51:43" {
+		t.Fatalf("handleTime 字符串形态: got %q", got)
+	}
+	if got := results[1].HandleTime.String(); got != "1787000000000" {
+		t.Fatalf("handleTime 数字形态: got %q", got)
+	}
+}
+
+// TestGetHandleResult_BusinessError 验证非 0 业务 code 返回 error。
+func TestGetHandleResult_BusinessError(t *testing.T) {
+	const resp = `{"code":400001,"msg":"application not found","data":null}`
+	c := newTestServer(t, http.StatusOK, resp, nil)
+	if _, err := c.GetHandleResult(context.Background(), []int64{1}); err == nil {
+		t.Fatal("expected error on non-zero business code")
+	}
+}
+
+// TestGetHandleResult_EmptyIDsNoRequest 验证 applicationIDs 为空时不发请求直接返回。
+func TestGetHandleResult_EmptyIDsNoRequest(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient(srv.URL, NewBasicAuth(BasicCredential{APIKey: "k"}))
+
+	results, err := c.GetHandleResult(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("GetHandleResult: %v", err)
+	}
+	if called {
+		t.Fatal("expected no HTTP request for empty applicationIDs")
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected empty result, got %d", len(results))
+	}
+}
+
 func TestMoveApplicationStage_Success(t *testing.T) {
 	var gotPath, gotQuery, gotMethod string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
