@@ -20,7 +20,7 @@ import (
 	"lina-plugin-linapro-recruit-pipeline/backend/config"
 	lark "linapro-lark-sdk/larkbitable"
 
-	mokabackend "lina-plugin-linapro-moka-recruit/backend/moka"
+	mokabackend "linapro-moka-recruit/moka"
 )
 
 // fakeOwnerResolver 是「多工号 → open_id 集合」解析替身：GZ001/GZ005/GZ009 → ou_1xx，

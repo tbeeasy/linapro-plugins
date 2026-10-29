@@ -19,7 +19,7 @@ import (
 	"lina-plugin-linapro-recruit-pipeline/backend/state"
 	lark "linapro-lark-sdk/larkbitable"
 
-	mokabackend "lina-plugin-linapro-moka-recruit/backend/moka"
+	mokabackend "linapro-moka-recruit/moka"
 
 	"lina-core/pkg/plugin/capability"
 	"lina-core/pkg/plugin/pluginhost"

@@ -26,7 +26,7 @@ default_install_mode: global
 
 # 插件说明，概述招聘流水线三条业务需求的能力边界与编排依赖。
 description: |
-  招聘流水线业务编排层，依赖 linapro-moka-recruit 客户端。
+  招聘流水线业务编排层，依赖共享库 linapro-moka-recruit。
   - 需求1：定时轮询 Moka 初筛阶段候选人，获取简历写飞书 Bitable，AI 判定后推进面试阶段。
   - 需求2：定时同步面试取消状态（status=3）回写 Bitable。
   - 需求3：定时从招聘报表回写评分列到 Bitable 已有记录。

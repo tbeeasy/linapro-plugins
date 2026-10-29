@@ -16,10 +16,10 @@ import (
 	"time"
 
 	"lina-plugin-linapro-employee-core/backend/cap/empcap"
-	mokabackend "lina-plugin-linapro-moka-recruit/backend/moka"
 	"lina-plugin-linapro-recruit-pipeline/backend/config"
 	"lina-plugin-linapro-recruit-pipeline/backend/state"
 	lark "linapro-lark-sdk/larkbitable"
+	mokabackend "linapro-moka-recruit/moka"
 )
 
 // RunCandidatePoll 轮询 Moka 初筛阶段候选人，按 applicationId 去重后写入 Bitable 并入 Redis 队列。

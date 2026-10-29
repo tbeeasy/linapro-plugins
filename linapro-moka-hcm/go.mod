@@ -1,4 +1,4 @@
-module lina-plugin-linapro-moka-hcm
+module linapro-moka-hcm
 
 go 1.25.0
 

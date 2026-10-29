@@ -8,7 +8,7 @@ require (
 	github.com/larksuite/oapi-sdk-go/v3 v3.11.0
 	lina-core v0.0.0
 	lina-plugin-linapro-employee-core v0.0.0
-	lina-plugin-linapro-moka-recruit v0.0.0
+	linapro-moka-recruit v0.0.0
 	linapro-lark-sdk v0.0.0
 )
 
@@ -49,6 +49,6 @@ require (
 replace (
 	lina-core => ../../lina-core
 	lina-plugin-linapro-employee-core => ../linapro-employee-core
-	lina-plugin-linapro-moka-recruit => ../linapro-moka-recruit
+	linapro-moka-recruit => ../linapro-moka-recruit
 	linapro-lark-sdk => ../linapro-lark-sdk
 )

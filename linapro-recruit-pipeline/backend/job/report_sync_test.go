@@ -21,7 +21,7 @@ import (
 
 	larkbitablesdk "github.com/larksuite/oapi-sdk-go/v3/service/bitable/v1"
 
-	mokabackend "lina-plugin-linapro-moka-recruit/backend/moka"
+	mokabackend "linapro-moka-recruit/moka"
 )
 
 // reportDataPath 与 moka-recruit 客户端约定的 getReportData 路径一致。

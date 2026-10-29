@@ -20,7 +20,7 @@ import (
 	lark "linapro-lark-sdk/larkbitable"
 
 	"lina-plugin-linapro-employee-core/backend/cap/empcap"
-	mokabackend "lina-plugin-linapro-moka-recruit/backend/moka"
+	mokabackend "linapro-moka-recruit/moka"
 )
 
 // interviewInfoBatchSize 是 interview-information 接口每批查询的 applicationId 上限。

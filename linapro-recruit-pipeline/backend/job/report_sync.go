@@ -14,7 +14,7 @@ import (
 	"lina-plugin-linapro-recruit-pipeline/backend/config"
 	lark "linapro-lark-sdk/larkbitable"
 
-	mokabackend "lina-plugin-linapro-moka-recruit/backend/moka"
+	mokabackend "linapro-moka-recruit/moka"
 )
 
 // reportColumns 保存从 report_field_mapping 解析出的报表评分表列映射。

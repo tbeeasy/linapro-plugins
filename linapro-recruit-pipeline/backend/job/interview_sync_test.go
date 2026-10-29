@@ -23,7 +23,7 @@ import (
 
 	larkbitablesdk "github.com/larksuite/oapi-sdk-go/v3/service/bitable/v1"
 
-	mokabackend "lina-plugin-linapro-moka-recruit/backend/moka"
+	mokabackend "linapro-moka-recruit/moka"
 )
 
 // defaultTestColumns 返回测试用的面试状态表列名集合。
