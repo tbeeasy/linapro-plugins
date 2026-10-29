@@ -1,5 +1,6 @@
 // Package larkim 封装飞书 IM 出站消息发送能力：向指定接收者
-// （open_id / user_id / email / chat_id）发送交互卡片（msg_type=interactive）。
+// （open_id / user_id / email / chat_id）发送交互卡片（msg_type=interactive，见 card.go）、
+// 纯文本（msg_type=text，见 text.go），以及文件 / 图片（先上传再发送，见 file.go）。
 //
 // 它复用同库 larkhttp 的 429 限流退避重试，不重复实现 token 管理——
 // tenant_access_token 的获取与刷新由官方 SDK 经注入的 larkhttp.Client 自动处理
@@ -15,7 +16,6 @@ package larkim
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 
@@ -40,31 +40,54 @@ const (
 	ReceiveIDTypeChatID = "chat_id"
 )
 
-// msgTypeInteractive 表示交互卡片消息类型。
-const msgTypeInteractive = "interactive"
+// msgKindInteractive / msgKindText 是错误信息里对消息种类的称呼，用于让失败日志
+// 一眼看出是哪类消息发失败了。抽 createMessage 后共用一条发送路径，错误文本仍按
+// 消息种类区分，既有卡片调用的错误信息保持原样。
+const (
+	msgKindInteractive = "交互卡片"
+	msgKindText        = "文本"
+	msgKindFile        = "文件"
+	msgKindImage       = "图片"
+)
+
+// messageCreator 是飞书「发送消息」接口的最小接缝：官方 SDK 的 Im.V1.Message
+// 结构化满足它。抽成接口只为让单测能注入假实现，生产路径始终走官方 SDK。
+type messageCreator interface {
+	Create(ctx context.Context, req *larkimv1.CreateMessageReq, options ...larkcore.RequestOptionFunc) (*larkimv1.CreateMessageResp, error)
+}
 
 // Client 使用飞书 app 凭据发送 IM 消息，复用 larkhttp 的限流退避。
 // 官方 SDK 依据 appID/appSecret 自动管理 tenant access token。
 type Client struct {
 	client *larkclient.Client
+	// messages 是发送消息接缝，nil 时使用 c.client.Im.V1.Message（见 messagesOrDefault）。
+	messages messageCreator
+	// files 是上传文件接缝，nil 时使用 c.client.Im.V1.File（见 file.go 的 filesOrDefault）。
+	files fileCreator
+	// images 是上传图片接缝，nil 时使用 c.client.Im.V1.Image（见 file.go 的 imagesOrDefault）。
+	images imageCreator
 }
 
 // NewClient 依据飞书 app 凭证构造 Client，注入 larkhttp 的 429 退避 HttpClient。
 func NewClient(appID, appSecret string) *Client {
-	return &Client{
-		client: larkclient.NewClient(appID, appSecret, larkclient.WithHttpClient(larkhttp.NewClient())),
-	}
+	c := larkclient.NewClient(appID, appSecret, larkclient.WithHttpClient(larkhttp.NewClient()))
+	return &Client{client: c, messages: c.Im.V1.Message, files: c.Im.V1.File, images: c.Im.V1.Image}
 }
 
-// SendInteractiveCard 向指定接收者发送一张交互卡片。
+// messagesOrDefault 返回发送消息接缝；未显式注入时回退到官方 SDK 实现。
+func (c *Client) messagesOrDefault() messageCreator {
+	if c.messages != nil {
+		return c.messages
+	}
+	return c.client.Im.V1.Message
+}
+
+// createMessage 是消息发送的共用请求构造与结果解析路径：各类消息（交互卡片、文本、
+// 文件、图片）只在 msg_type 与 content 上不同，其余（接收者校验、限流退避、错误映射）完全一致。
+// kind 仅用于错误信息里的消息种类称呼，不参与请求构造。
 //
-// receiveIDType 取 ReceiveIDTypeOpenID / ReceiveIDTypeUserID /
-// ReceiveIDTypeEmail / ReceiveIDTypeChatID；receiveID 为对应类型的接收者 ID。
-// cardJSON 为飞书 interactive 卡片的 schema JSON 串（可经 BuildActionCard 构造）。
-//
-// 成功返回飞书 message_id。发送经 larkhttp 自动退避 429 限流，失败时返回带
-// req_id/code/msg 的 gerror，供调用方按评价者粒度计入未推送清单。
-func (c *Client) SendInteractiveCard(ctx context.Context, receiveIDType, receiveID, cardJSON string) (string, error) {
+// 成功返回飞书 message_id；失败返回带 req_id/code/msg 的 gerror。
+func (c *Client) createMessage(ctx context.Context, receiveIDType, receiveID, msgType, content, kind string) (string, error) {
 	if receiveIDType == "" || receiveID == "" {
 		return "", gerror.New("larkim: receiveIDType 与 receiveID 均不能为空")
 	}
@@ -72,147 +95,21 @@ func (c *Client) SendInteractiveCard(ctx context.Context, receiveIDType, receive
 		ReceiveIdType(receiveIDType).
 		Body(larkimv1.NewCreateMessageReqBodyBuilder().
 			ReceiveId(receiveID).
-			MsgType(msgTypeInteractive).
-			Content(cardJSON).
+			MsgType(msgType).
+			Content(content).
 			Build()).
 		Build()
 
-	resp, err := c.client.Im.V1.Message.Create(ctx, req)
+	resp, err := c.messagesOrDefault().Create(ctx, req)
 	if err != nil {
-		return "", gerror.Wrap(err, "larkim: 发送交互卡片请求失败")
+		return "", gerror.Wrapf(err, "larkim: 发送%s请求失败", kind)
 	}
 	if !resp.Success() {
-		return "", gerror.Newf("larkim: 发送交互卡片失败 req_id=%s code=%d msg=%s%s",
-			resp.RequestId(), resp.Code, resp.Msg, utils.CodeErrorDetail(resp.CodeError))
+		// 返回结构化错误：调用方需要 code/req_id 写日志，又不该解析字符串。
+		return "", newFeishuError(kind, resp.Code, resp.Msg, resp.RequestId(), utils.CodeErrorDetail(resp.CodeError))
 	}
 	if resp.Data == nil || resp.Data.MessageId == nil {
-		return "", gerror.New("larkim: 发送交互卡片未返回 message_id")
+		return "", gerror.Newf("larkim: 发送%s未返回 message_id", kind)
 	}
 	return larkcore.StringValue(resp.Data.MessageId), nil
-}
-
-// actionCardSchema 是飞书 interactive 卡片的最小可发送结构。
-// 仅显式定义 larkim 需要拼装的字段；其余字段交飞书默认渲染。
-type actionCardSchema struct {
-	Schema       string           `json:"schema"` // 固定 "2.0"
-	CardLink     *cardLink        `json:"card_link,omitempty"`
-	Header       *cardHeader      `json:"header,omitempty"`
-	Body         cardBody         `json:"body"`
-	BodyElements []bodyElement    `json:"body_elements,omitempty"`
-	Elements     []markdownColumn `json:"elements,omitempty"` // 兼容 1.0 卡片 column 元素
-}
-
-type cardLink struct {
-	URL string `json:"url"`
-}
-
-type cardHeader struct {
-	Title    cardText `json:"title"`
-	Template string   `json:"template,omitempty"` // 颜色模板，如 "blue"
-}
-
-type cardBody struct {
-	Elements []bodyElement `json:"elements"`
-}
-
-type bodyElement struct {
-	Tag     string    `json:"tag"`
-	Content string    `json:"content,omitempty"`
-	Text    *cardText `json:"text,omitempty"`
-	Actions []action  `json:"actions,omitempty"`
-}
-
-type cardText struct {
-	Tag     string `json:"tag"`               // "plain_text" 或 "lark_md"
-	Content string `json:"content,omitempty"` // plain_text 用
-	Lines   []line `json:"lines,omitempty"`   // lark_md 多行
-}
-
-type line struct {
-	Text string `json:"text"`
-}
-
-type action struct {
-	Tag      string   `json:"tag"` // "button"
-	Text     cardText `json:"text"`
-	Type     string   `json:"type,omitempty"`
-	URL      string   `json:"url,omitempty"`
-	MultiURL multiURL `json:"multi_url,omitempty"`
-}
-
-type multiURL struct {
-	URL string `json:"url"`
-}
-
-type markdownColumn struct {
-	Tag      string   `json:"tag"`
-	Text     cardText `json:"text,omitempty"`
-	Elements []action `json:"elements,omitempty"`
-}
-
-// BuildActionCard 把「标题 + markdown 正文 + 按钮文案 + 按钮 URL」拼装为
-// 飞书 interactive 卡片 JSON，供消费方无需了解卡片 JSON 细节即可发送
-// "立即填写" 类卡片。markdown 为飞书 lark_md 串；btn 为空则不生成按钮。
-func BuildActionCard(title, markdown, btnText, btnURL string) (string, error) {
-	if title == "" && markdown == "" {
-		return "", gerror.New("larkim: 标题与正文不能同时为空")
-	}
-	card := actionCardSchema{
-		Schema: "2.0",
-	}
-	if title != "" {
-		card.Header = &cardHeader{
-			Title:    cardText{Tag: "plain_text", Content: title},
-			Template: "blue",
-		}
-	}
-	bodyElems := []bodyElement{}
-	if markdown != "" {
-		// lark_md 多行：按换行拆成 lines。
-		lines := splitLines(markdown)
-		mdLines := make([]line, 0, len(lines))
-		for _, l := range lines {
-			mdLines = append(mdLines, line{Text: l})
-		}
-		bodyElems = append(bodyElems, bodyElement{
-			Tag:  "div",
-			Text: &cardText{Tag: "lark_md", Lines: mdLines},
-		})
-	}
-	if btnText != "" && btnURL != "" {
-		bodyElems = append(bodyElems, bodyElement{
-			Tag: "action",
-			Actions: []action{{
-				Tag:      "button",
-				Text:     cardText{Tag: "plain_text", Content: btnText},
-				Type:     "primary",
-				MultiURL: multiURL{URL: btnURL},
-			}},
-		})
-	}
-	card.Body = cardBody{Elements: bodyElems}
-
-	b, err := json.Marshal(card)
-	if err != nil {
-		return "", gerror.Wrapf(err, "larkim: 序列化卡片 JSON 失败")
-	}
-	return string(b), nil
-}
-
-// splitLines 按换行拆串，丢弃空行尾的空串，便于 lark_md lines 渲染。
-func splitLines(s string) []string {
-	var out []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			out = append(out, s[start:i])
-			start = i + 1
-		}
-	}
-	out = append(out, s[start:])
-	// 去尾空串
-	for len(out) > 0 && out[len(out)-1] == "" {
-		out = out[:len(out)-1]
-	}
-	return out
 }

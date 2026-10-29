@@ -22,10 +22,21 @@ hooks, and ships no SQL or menus.
   and associated organizations, returning users tagged with `own`/`assoc`
   `Source` and deduplicated by `open_id`.
 - **`larkim`** — IM outbound messaging: send interactive cards
-  (`msg_type=interactive`) to a receiver (`open_id` / `user_id` / `email` /
-  `chat_id`), reusing `larkhttp`'s 429 backoff. Token management is left to the
-  official SDK. Also exposes `BuildActionCard` to assemble a minimal
-  title + markdown + action-button card JSON.
+  (`msg_type=interactive`) or plain text (`msg_type=text`) to a receiver
+  (`open_id` / `user_id` / `email` / `chat_id`), reusing `larkhttp`'s 429
+  backoff. Token management is left to the official SDK. Also exposes
+  `BuildTemplateCard` to assemble the `content` JSON that references a Feishu
+  card template (template ID, version name and template variables), and
+  `BuildTextContent` to encode plain text as text-message `content` (quotes,
+  backslashes, newlines and emoji all go through `encoding/json` escaping; empty
+  or over-long text returns an error instead of being truncated, capped at
+  `MaxTextRunes` = 2000 characters). Files and images: `UploadFile`
+  (`im/v1/files`, returns `file_key`, at most `MaxFileBytes` = 30 MB) and
+  `UploadImage` (`im/v1/images`, returns `image_key`, at most `MaxImageBytes` =
+  10 MB), then `SendFile` / `SendImage` (`msg_type=file` / `image`). Keys belong to
+  the uploading app, so upload with the same credentials that will send.
+  `FileTypeOf` maps a file name to Feishu `file_type`; `IsUploadableImage` detects
+  supported images by content.
 - **`utils`** — small formatting helpers shared across the sub-packages.
 
 ## Boundary constraints
@@ -45,6 +56,13 @@ hooks, and ships no SQL or menus.
 | `linapro-recruit-pipeline` | `larkbitable` (write verdicts / persons), `larkhttp` |
 | `linapro-moka-report-sync` | `larkbitable` (write report persons), `larkhttp` |
 | `linapro-eval-360` | `larkim` (one-card-per-evaluator push) |
+| `linapro-employee-core` | `larkcontact` (directory enumeration), `larkhttp` |
+| `linapro-lark-push` | `larkim` (text, file and image push) |
+
+Feishu credential parsing is deliberately **not** in this SDK: each plugin reads its
+own config key (`plugin.linapro-employee-core.lark_apps` for identity apps,
+`plugin.linapro-lark-push.push_groups` for push apps), so there is no shared config
+package to keep in sync.
 
 See `openspec/changes/archive/2026-09-20-extract-shared-lark-sdk/` for the
 extraction design.

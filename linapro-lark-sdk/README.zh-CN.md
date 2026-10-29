@@ -17,9 +17,16 @@ moka-report-sync、eval-360）经 go.mod `replace` 指令导入。它**不是插
 - **`larkcontact`** —— 通讯录枚举（本租户 own + 关联组织 assoc），返回用户带
   `own`/`assoc` `Source` 标记，按 `open_id` 去重。
 - **`larkim`** —— IM 出站消息：向接收者（`open_id` / `user_id` / `email` /
-  `chat_id`）发送交互卡片（`msg_type=interactive`），复用 `larkhttp` 的 429 退避。
-  token 管理交官方 SDK。另提供 `BuildActionCard` 拼装最小「标题 + markdown + 按钮」
-  卡片 JSON。
+  `chat_id`）发送交互卡片（`msg_type=interactive`）或纯文本（`msg_type=text`），
+  复用 `larkhttp` 的 429 退避。token 管理交官方 SDK。另提供 `BuildTemplateCard`
+  拼装引用飞书卡片模板的 `content` JSON（模板 ID、版本名与模板变量），与
+  `BuildTextContent` 把纯文本严格编码为 text 消息的 `content`（引号/反斜杠/换行/
+  emoji 都走 `encoding/json` 转义；空文本与超长文本返回错误而非截断，上限
+  `MaxTextRunes` = 2000 字符）。文件与图片：`UploadFile`（`im/v1/files`，返回 `file_key`，
+  上限 `MaxFileBytes` = 30 MB）与 `UploadImage`（`im/v1/images`，返回 `image_key`，上限
+  `MaxImageBytes` = 10 MB），再经 `SendFile` / `SendImage`（`msg_type=file` / `image`）发送。
+  key 归属上传它的应用，须用即将发送的那个应用凭据上传。`FileTypeOf` 按文件名推导飞书
+  `file_type`，`IsUploadableImage` 按内容识别可上传的图片。
 - **`utils`** —— 子包共享的小型格式化辅助。
 
 ## 边界约束
@@ -36,5 +43,11 @@ moka-report-sync、eval-360）经 go.mod `replace` 指令导入。它**不是插
 | `linapro-recruit-pipeline` | `larkbitable`（写结论/人员）、`larkhttp` |
 | `linapro-moka-report-sync` | `larkbitable`（写报表人员）、`larkhttp` |
 | `linapro-eval-360` | `larkim`（一评价者一张卡推送） |
+| `linapro-employee-core` | `larkcontact`（通讯录枚举）、`larkhttp` |
+| `linapro-lark-push` | `larkim`（文本、文件与图片推送） |
+
+飞书凭据解析刻意**不放进本 SDK**：各插件读各自的配置键（身份应用 →
+`plugin.linapro-employee-core.lark_apps`，推送应用 → `plugin.linapro-lark-push.push_groups`），
+不需要一份需要长期同步的共享配置包。
 
 抽取设计见 `openspec/changes/archive/2026-09-20-extract-shared-lark-sdk/`。
