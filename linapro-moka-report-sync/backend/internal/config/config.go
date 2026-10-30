@@ -13,7 +13,7 @@ import (
 	"lina-core/pkg/plugin/capability/bizctxcap"
 	"lina-core/pkg/plugin/capability/hostconfigcap"
 
-	"lina-plugin-linapro-moka-hcm/backend/hcm"
+	"linapro-moka-hcm/hcm"
 )
 
 const (

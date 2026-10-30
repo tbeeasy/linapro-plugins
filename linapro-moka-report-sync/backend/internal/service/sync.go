@@ -16,8 +16,8 @@ import (
 	"lina-core/pkg/plugin/capability"
 
 	"lina-plugin-linapro-employee-core/backend/cap/empcap"
-	"lina-plugin-linapro-moka-hcm/backend/hcm"
-	recruitclient "lina-plugin-linapro-moka-recruit/backend/moka"
+	"linapro-moka-hcm/hcm"
+	recruitclient "linapro-moka-recruit/moka"
 
 	lark "linapro-lark-sdk/larkbitable"
 

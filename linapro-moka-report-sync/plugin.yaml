@@ -29,7 +29,7 @@ description: |
   定时把 Moka 报表中心数据同步到飞书多维表格（Bitable）。
   - 通过 Moka getReportData 接口按 reportId 拉取报表
   - 工号主键 + 交集列完整性门闩写入 Bitable（新增 / 重写 / 冻结）
-  依赖 linapro-moka-hcm 插件提供 Moka API 客户端能力。
+  依赖共享库 linapro-moka-hcm 提供 Moka API 客户端能力。
 
 # 插件作者或归属团队。
 author: linapro
