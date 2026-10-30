@@ -1,3 +1,6 @@
+// 本文件是员工列表接口的单测：用 httptest 假服务器覆盖单页字段映射、
+// 多页翻页终止、employee_status_id 优先于文本、以及非成功 code 的报错。
+// 注意：测试以 noopAuthor 跳过真实签名，因此不校验签名参数。
 package hcm
 
 import (

@@ -1,3 +1,8 @@
+// 本文件提供 Moka HCM 的 MD5withRSA 签名工具：CanonicalString 生成待签规范串，
+// Sign 计算 base64 签名，Verify 供单测与运维诊断校验，BuildQuery 组装可追加到
+// URL 的签名查询串，ParsePrivateKey 解析 PEM 私钥，BasicAuthHeader 构造认证头。
+// 注意：规范串使用未编码原始值拼接，URL 编码只在 BuildQuery 中发生一次，
+// 避免重复编码导致签名与服务端计算不一致。
 package hcm
 
 import (

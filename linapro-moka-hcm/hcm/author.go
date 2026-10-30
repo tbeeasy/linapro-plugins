@@ -1,3 +1,8 @@
+// 本文件定义 Moka HCM OpenAPI 的认证材料与认证实现：HCMCredential 承载
+// Basic 凭据、RSA 私钥与各接口的 apiCode；Author 声明认证注入接口；
+// HCMAuth 在每个出站请求上叠加 Basic 认证头与签名查询参数。
+// 注意：apiCode 按调用传入，因为每个 Moka 接口各有编码；调用方需自行从
+// 运行期配置读取凭据并填入 HCMCredential，本库不读配置、不落库保存凭据。
 package hcm
 
 import (

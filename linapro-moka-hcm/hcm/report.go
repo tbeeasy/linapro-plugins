@@ -1,3 +1,8 @@
+// 本文件实现 Moka HCM 报表接口：GetReportData 按 reportId 拉取单个报表，
+// 返回 ReportHeader（表头）与 ReportData（表头 + 行数据 + 总数）。
+// apiCode 取自 HCMCredential.APICodes[APICodeKeyReportData]，使用方必须自行填入。
+// 注意：成功码同时接受文档值 200 与 legacy 值 1000000；响应 data 为 null 时返回
+// 空结构而非报错，避免上游因空报表中断整轮同步。
 package hcm
 
 import (

@@ -1,3 +1,9 @@
+// 本文件实现 Moka HCM 员工列表接口：ListEmployees 拉取一页员工，
+// ListAllEmployees 按 200 条一页循环翻页直至拉完全量，供员工目录同步消费。
+// 只解码同步所需字段（工号、姓名、部门、员工类型、在职状态与日期），
+// 薪资、证件、银行卡等其余字段直接丢弃，不进内存。
+// 注意：batch/data 要求以 userName（操作人邮箱）作为签名查询参数，
+// 取自 HCMCredential.OperatorEmail；pageSize 上限 200。
 package hcm
 
 import (
