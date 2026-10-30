@@ -1,4 +1,4 @@
-module lina-plugin-linapro-moka-recruit
+module linapro-moka-recruit
 
 go 1.25.0
 
