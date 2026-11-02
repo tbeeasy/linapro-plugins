@@ -1,0 +1,72 @@
+{
+  "plugins": {
+    "linapro_employee_core": {
+      "api": {
+        "emp": {
+          "v1": {
+            "LoginReq": {
+              "meta": {
+                "summary": "员工飞书登录",
+                "tags": "考勤/员工",
+                "dc": "用飞书登录码换取员工 JWT。公开接口（无需会话）。在指定租户内解析员工；仅当租户开启自动开通时才惰性创建员工壳记录，否则拒绝未登记用户。"
+              },
+              "fields": {
+                "tenantId": {
+                  "dc": "员工所属租户；用于选择飞书应用凭据"
+                },
+                "code": {
+                  "dc": "来自 tt.login / 网页授权的飞书登录预授权码"
+                }
+              }
+            },
+            "LoginRes": {
+              "fields": {
+                "token": {
+                  "dc": "员工 JWT（HS256，2 小时，无刷新）；过期后重新登录"
+                },
+                "empId": {
+                  "dc": "内部员工 id（与身份提供方无关）"
+                },
+                "name": {
+                  "dc": "员工显示名称"
+                },
+                "employeeNo": {
+                  "dc": "员工工号，未知时为空"
+                }
+              }
+            },
+            "MeReq": {
+              "meta": {
+                "summary": "当前员工",
+                "tags": "考勤/员工",
+                "dc": "返回由员工 JWT 解析出的当前员工身份，并进行一次实时状态校验。"
+              }
+            },
+            "MeRes": {
+              "fields": {
+                "empId": {
+                  "dc": "内部员工 id"
+                },
+                "tenantId": {
+                  "dc": "租户 id"
+                },
+                "name": {
+                  "dc": "员工显示名称"
+                },
+                "employeeNo": {
+                  "dc": "员工工号"
+                },
+                "status": {
+                  "dc": "1=在职 0=离职"
+                },
+                "departmentIds": {
+                  "dc": "员工所属的 org-core 部门 id"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

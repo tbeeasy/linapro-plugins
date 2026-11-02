@@ -1,0 +1,62 @@
+{
+  "error": {
+    "plugin": {
+      "employee": {
+        "core": {
+          "employee": {
+            "not": {
+              "found": "未找到员工"
+            }
+          },
+          "unauthorized": "员工身份认证失败",
+          "service": {
+            "unbound": "员工服务不可用"
+          },
+          "token": {
+            "secret": {
+              "unavailable": "员工令牌签名密钥未配置"
+            }
+          },
+          "lark": {
+            "credential": {
+              "missing": "该租户未配置飞书应用凭据"
+            },
+            "authen": {
+              "failed": "飞书登录换取失败"
+            },
+            "contact": {
+              "failed": "飞书通讯录查询失败"
+            },
+            "apps": {
+              "config": {
+                "read": {
+                  "failed": "读取飞书应用配置失败"
+                },
+                "invalid": "飞书应用配置格式错误"
+              }
+            },
+            "identity": {
+              "taken": "该飞书身份已绑定到其他员工",
+              "not": {
+                "found": "该员工名下没有这条飞书身份"
+              }
+            },
+            "user": {
+              "not": {
+                "found": "所选飞书应用通讯录中找不到该用户"
+              }
+            }
+          },
+          "sys": {
+            "user": {
+              "taken": "该后台账号已关联其他员工"
+            }
+          },
+          "invalid": {
+            "parameter": "编辑参数不合法"
+          }
+        }
+      }
+    }
+  }
+}

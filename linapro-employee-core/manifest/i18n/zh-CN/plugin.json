@@ -1,0 +1,8 @@
+{
+  "plugin": {
+    "linapro-employee-core": {
+      "name": "员工身份-核心",
+      "description": "提供基于飞书认证的员工身份、按租户的登录，以及考勤与问卷插件共用的 EmpAuth 会话通道。业务数据引用内部 EmpID，而非飞书 open_id。"
+    }
+  }
+}

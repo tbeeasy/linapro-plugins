@@ -1,0 +1,62 @@
+{
+  "error": {
+    "plugin": {
+      "employee": {
+        "core": {
+          "employee": {
+            "not": {
+              "found": "Employee not found"
+            }
+          },
+          "unauthorized": "Employee authentication failed",
+          "service": {
+            "unbound": "Employee service is unavailable"
+          },
+          "token": {
+            "secret": {
+              "unavailable": "Employee token secret is not configured"
+            }
+          },
+          "lark": {
+            "credential": {
+              "missing": "No Lark app credential configured for this tenant"
+            },
+            "authen": {
+              "failed": "Lark login exchange failed"
+            },
+            "contact": {
+              "failed": "Lark contact query failed"
+            },
+            "apps": {
+              "config": {
+                "read": {
+                  "failed": "Failed to read Lark app configuration"
+                },
+                "invalid": "Lark app configuration is invalid"
+              }
+            },
+            "identity": {
+              "taken": "This Lark identity is already bound to another employee",
+              "not": {
+                "found": "No such Lark identity under this employee"
+              }
+            },
+            "user": {
+              "not": {
+                "found": "The user is not found in the selected Lark app's contact scope"
+              }
+            }
+          },
+          "sys": {
+            "user": {
+              "taken": "This system account is already linked to another employee"
+            }
+          },
+          "invalid": {
+            "parameter": "Invalid edit parameter"
+          }
+        }
+      }
+    }
+  }
+}

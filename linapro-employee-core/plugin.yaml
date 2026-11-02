@@ -5,7 +5,7 @@ id: linapro-employee-core
 name: Employee Identity - Core
 
 # 插件语义化版本号，当前示例统一使用带 `v` 前缀的写法。
-version: v0.1.0
+version: v0.1.1
 
 # 插件类型枚举。可选值：`source` 表示随宿主源码编译交付；`dynamic` 表示作为运行时动态插件产物加载。
 type: source
@@ -34,6 +34,44 @@ homepage: https://example.com/lina/plugins/linapro-employee-core
 
 # 插件许可证标识。
 license: Apache-2.0
+
+# 后台菜单：通讯录管理（一级目录）+ 员工列表（菜单页）。
+# 目录为 type D、无 parent_key，sort 取 13 避让 eval-360 的 12；
+# 列表页承载列表 / 详情抽屉 / 有限编辑（只改同步不写的字段，见 design D25），
+# 刻意不设新增与删除按钮权限点——员工行由 Moka 全量同步维护。
+menus:
+  - key: plugin:linapro-employee-core:contacts
+    name: 通讯录管理
+    path: contacts
+    icon: lucide:book-user
+    type: D
+    sort: 13
+    visible: 1
+    remark: 员工通讯录管理端入口
+  - key: plugin:linapro-employee-core:contacts:employees
+    parent_key: plugin:linapro-employee-core:contacts
+    name: 员工列表
+    path: /contacts/employees
+    component: system/plugin/dynamic-page
+    perms: linapro-employee-core:employee:list
+    type: M
+    sort: 1
+    visible: 1
+    remark: Moka 同步落库的员工花名册
+  # 按钮权限点：查看详情（详情抽屉）。
+  - key: plugin:linapro-employee-core:contacts:employees:detail
+    parent_key: plugin:linapro-employee-core:contacts:employees
+    name: 员工详情
+    perms: linapro-employee-core:employee:query
+    type: B
+    sort: 1
+  # 按钮权限点：编辑（绑定/解绑飞书身份、关联后台账号）。
+  - key: plugin:linapro-employee-core:contacts:employees:edit
+    parent_key: plugin:linapro-employee-core:contacts:employees
+    name: 员工编辑
+    perms: linapro-employee-core:employee:edit
+    type: B
+    sort: 2
 
 # 插件国际化配置。该配置与宿主 i18n 配置结构保持一致；启用后需提供对应语言资源。
 i18n:

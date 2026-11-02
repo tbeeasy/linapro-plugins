@@ -1,0 +1,8 @@
+{
+  "plugin": {
+    "linapro-employee-core": {
+      "name": "Employee Identity - Core",
+      "description": "Provides Lark-authenticated employee identity, per-tenant login, and the EmpAuth session seam shared by attendance and survey plugins. Business data references the internal EmpID, not the Lark open_id."
+    }
+  }
+}
