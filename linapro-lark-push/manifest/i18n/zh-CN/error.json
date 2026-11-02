@@ -1,0 +1,99 @@
+{
+  "error": {
+    "linapro": {
+      "lark": {
+        "push": {
+          "api": {
+            "key": {
+              "app": {
+                "key": {
+                  "exists": "app_key {appKey} 已存在"
+                }
+              },
+              "delete": {
+                "failed": "删除签名凭据失败"
+              },
+              "group": {
+                "not": {
+                  "found": "推送分组 {group} 未在 push_groups 中配置"
+                }
+              },
+              "groups": {
+                "unavailable": "读取 push_groups 推送分组失败"
+              },
+              "invalid": {
+                "param": "签名凭据参数非法：{item}"
+              },
+              "not": {
+                "found": "签名凭据不存在或已删除"
+              },
+              "query": {
+                "failed": "查询签名凭据失败"
+              },
+              "save": {
+                "failed": "保存签名凭据失败"
+              }
+            }
+          },
+          "body": {
+            "too": {
+              "large": "请求体超过 {limit} 上限"
+            }
+          },
+          "config": {
+            "invalid": "飞书配置非法：{item}"
+          },
+          "credential": {
+            "store": {
+              "unavailable": "签名凭据存储不可用，暂时拒绝请求"
+            }
+          },
+          "empcap": {
+            "unbound": "员工能力服务未就绪，无法解析收件人"
+          },
+          "host": {
+            "config": {
+              "missing": "宿主配置能力不可用"
+            }
+          },
+          "invalid": {
+            "param": "请求参数非法：{item}"
+          },
+          "no": {
+            "push": {
+              "app": "推送分组 {group} 没有可用的飞书推送应用，请检查 push_groups.{group} 配置"
+            }
+          },
+          "nonce": {
+            "store": {
+              "unavailable": "nonce 去重存储不可用，暂时拒绝请求"
+            }
+          },
+          "sender": {
+            "unbound": "飞书推送能力未就绪"
+          },
+          "signature": {
+            "mismatch": "签名不匹配",
+            "missing": "缺少签名头（须提供 X-App-Key / X-Timestamp / X-Nonce / X-Signature，nonce 长度 16~64）",
+            "nonce": {
+              "replayed": "nonce 已使用过，请为每次请求生成新的随机串"
+            },
+            "timestamp": {
+              "invalid": "时间戳无效或超出 ±300 秒窗口，请检查调用方时钟"
+            },
+            "unknown": {
+              "app": {
+                "key": "app_key 未知或未启用"
+              }
+            }
+          },
+          "send": {
+            "partial": {
+              "failed": "{count} 个收件人投递失败"
+            }
+          }
+        }
+      }
+    }
+  }
+}

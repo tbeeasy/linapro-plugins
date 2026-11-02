@@ -1,0 +1,99 @@
+{
+  "error": {
+    "linapro": {
+      "lark": {
+        "push": {
+          "api": {
+            "key": {
+              "app": {
+                "key": {
+                  "exists": "app_key {appKey} already exists"
+                }
+              },
+              "delete": {
+                "failed": "Failed to delete signature credential"
+              },
+              "group": {
+                "not": {
+                  "found": "Push group {group} is not configured in push_groups"
+                }
+              },
+              "groups": {
+                "unavailable": "Failed to read push groups from push_groups config"
+              },
+              "invalid": {
+                "param": "Invalid signature credential parameter: {item}"
+              },
+              "not": {
+                "found": "Signature credential does not exist or has been deleted"
+              },
+              "query": {
+                "failed": "Failed to query signature credentials"
+              },
+              "save": {
+                "failed": "Failed to save signature credential"
+              }
+            }
+          },
+          "body": {
+            "too": {
+              "large": "Request body exceeds the {limit} limit"
+            }
+          },
+          "config": {
+            "invalid": "Invalid Feishu configuration: {item}"
+          },
+          "credential": {
+            "store": {
+              "unavailable": "Signature credential storage is unavailable; the request is temporarily rejected"
+            }
+          },
+          "empcap": {
+            "unbound": "Employee capability is not ready; recipients cannot be resolved"
+          },
+          "host": {
+            "config": {
+              "missing": "Host configuration capability is unavailable"
+            }
+          },
+          "invalid": {
+            "param": "Invalid request parameter: {item}"
+          },
+          "no": {
+            "push": {
+              "app": "Push group {group} has no available Feishu push app; check push_groups.{group}"
+            }
+          },
+          "nonce": {
+            "store": {
+              "unavailable": "Replay-protection storage is unavailable; the request is temporarily rejected"
+            }
+          },
+          "sender": {
+            "unbound": "Feishu push capability is not ready"
+          },
+          "signature": {
+            "mismatch": "Signature mismatch",
+            "missing": "Missing signature headers (X-App-Key / X-Timestamp / X-Nonce / X-Signature are required; nonce must be 16-64 characters)",
+            "nonce": {
+              "replayed": "Nonce has already been used; generate a fresh random string for every request"
+            },
+            "timestamp": {
+              "invalid": "Timestamp is invalid or outside the ±300 second window; check the caller clock"
+            },
+            "unknown": {
+              "app": {
+                "key": "Unknown or disabled app_key"
+              }
+            }
+          },
+          "send": {
+            "partial": {
+              "failed": "{count} recipient(s) failed to receive the message"
+            }
+          }
+        }
+      }
+    }
+  }
+}

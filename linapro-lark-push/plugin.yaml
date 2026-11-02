@@ -1,0 +1,99 @@
+# 插件唯一标识，必须在宿主和源码插件目录中保持唯一，并使用 `kebab-case` 命名风格。
+id: linapro-lark-push
+
+# 插件显示名称，用于插件管理页面、开发文档和展示。
+name: 飞书消息推送
+
+# 插件语义化版本号，当前示例统一使用带 `v` 前缀的写法。
+version: v0.1.2
+
+# 插件类型枚举。`source` 表示随宿主源码编译交付；`dynamic` 表示作为运行时动态插件产物加载。
+type: source
+
+# 插件分发治理枚举。`managed` 表示本领域插件通过插件管理显式治理；它不是宿主关键 builtin，
+# 宿主启动不会自动安装。未安装或禁用时本插件能力 fail-closed（门面返回「能力未就绪」）。
+distribution: managed
+
+# 多租户作用域枚举。`platform_only` 表示仅平台上下文可见和治理。
+# 推送按「工号 → 各企业 user_id」扇出，不按调用方租户切分。
+scope_nature: platform_only
+
+# 多租户支持标记。`true` 表示插件支持租户级安装、租户级启用与新租户开通策略治理。
+supports_multi_tenant: false
+
+# 默认安装模式枚举。`global` 表示全局统一安装启用；`tenant_scoped` 表示按租户独立启用或禁用。
+default_install_mode: global
+
+# 插件说明，概述能力边界。
+description: |
+  飞书消息推送能力插件（文本、文件 / 图片 + 进程内交互卡片；收件人可以是人或群聊）。
+  - 进程内门面 backend/cap/larkpushcap：其它插件以「工号 / 群聊 + 文本 / 文件 / 卡片构造函数」请求投递；
+  - 对外 HTTP 接口 POST /x/linapro-lark-push/open/v1/message/text 与 /message/file，插件自建 HMAC 签名鉴权；
+  - 签名凭据在后台「系统设置 → 飞书推送凭据」维护（含群聊目标，调用方不能指定 chat_id），
+    每次请求查库，停用 / 删除即时生效；
+  - 个人收件人按工号表达，系统按「此人在哪些企业有身份」自动扇出（双发为预期行为）；
+    群聊收件人只经指定的推送应用投递一次；
+  - 推送应用按调用方分组（push_groups.<调用方插件 ID>），请求必须带分组、只用该分组投递；
+    只用推送应用凭据发送，identity_app_id 仅用于查 user_id。
+  依赖 linapro-employee-core 的 empcap 提供「工号 → 企业级 user_id」寻址。
+
+# 插件作者或归属团队。
+author: linapro
+
+# 插件许可证标识。
+license: Apache-2.0
+
+# 插件菜单：挂在宿主「系统设置」目录下的签名凭据管理页，及其按钮权限点。
+menus:
+  - key: plugin:linapro-lark-push:api-keys
+    parent_key: setting
+    name: 飞书推送凭据
+    path: linapro-lark-push-api-keys
+    component: system/plugin/dynamic-page
+    perms: linapro-lark-push:api-key:list
+    icon: lucide:key-round
+    type: M
+    sort: 30
+    remark: 对外推送接口的 HMAC 签名凭据管理
+  - key: plugin:linapro-lark-push:api-keys:add
+    parent_key: plugin:linapro-lark-push:api-keys
+    name: 新增凭据
+    perms: linapro-lark-push:api-key:add
+    type: B
+    sort: 1
+  - key: plugin:linapro-lark-push:api-keys:edit
+    parent_key: plugin:linapro-lark-push:api-keys
+    name: 编辑凭据
+    perms: linapro-lark-push:api-key:edit
+    type: B
+    sort: 2
+  - key: plugin:linapro-lark-push:api-keys:remove
+    parent_key: plugin:linapro-lark-push:api-keys
+    name: 删除凭据
+    perms: linapro-lark-push:api-key:remove
+    type: B
+    sort: 3
+  - key: plugin:linapro-lark-push:api-keys:secret
+    parent_key: plugin:linapro-lark-push:api-keys
+    name: 查看密钥
+    perms: linapro-lark-push:api-key:secret
+    type: B
+    sort: 4
+
+# 插件依赖声明。`plugins` 声明插件间依赖。
+dependencies:
+  # linapro-employee-core 拥有 lark_identity 表与「工号 → user_id」寻址契约；
+  # 未启用时本插件门面返回「能力未就绪」，不静默丢消息。
+  plugins:
+    - id: linapro-employee-core
+      version: ">=0.1.0"
+
+# 插件国际化配置。该配置与宿主 i18n 配置结构保持一致；启用后需提供对应语言资源。
+i18n:
+  enabled: false
+  default: zh-CN
+  locales:
+    - locale: en-US
+      nativeName: English
+    - locale: zh-CN
+      nativeName: 简体中文

@@ -1,0 +1,8 @@
+{
+  "plugin": {
+    "linapro-lark-push": {
+      "name": "Lark Message Push",
+      "description": "Feishu message push capability plugin (no menus, no pages): an in-process facade (text and interactive cards) plus an external HTTP text endpoint that fans out by employee number to each company's push app."
+    }
+  }
+}
