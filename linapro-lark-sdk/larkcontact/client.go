@@ -42,6 +42,20 @@ const assocThrottle = 50 * time.Millisecond
 // trust_party.collaboration_tenant_collaboration_user.get 接口限制为 5次/秒。
 const assocUserDetailThrottle = 200 * time.Millisecond
 
+// 飞书通讯录「获取单个用户信息」在 open_id 不可用时的错误码。
+// 两者对调用方语义相同——该 open_id 无法在这个应用下使用：
+//   - 41012 user id invalid error：ID 本身无效或用户已删除；
+//   - 41050 no user authority error：用户不在本应用的通讯录权限范围内
+//     （scope 已开但数据范围未覆盖，属于最常见的「查得到企业、查不到这个人」）。
+const (
+	codeUserIDInvalid   = 41012
+	codeNoUserAuthority = 41050
+)
+
+// ErrUserNotFound 表示按 open_id 在该应用下查不到用户：ID 无效、用户已删除，
+// 或不在应用的通讯录权限范围内。调用方应据此拒绝写入该身份，而不是当成临时故障重试。
+var ErrUserNotFound = gerror.New("larkcontact: user not found in app contact scope")
+
 // Source 标识成员来自哪个视角：own=本租户原生成员；assoc=关联组织视角成员。
 const (
 	// SourceOwn 是枚举本租户通讯录（contact.User.List / FindByDepartment）所得成员的来源。
@@ -84,6 +98,54 @@ func NewClient(appID, appSecret string) *Client {
 
 // AppID 返回该 Client 对应的飞书 App ID。
 func (c *Client) AppID() string { return c.appID }
+
+// GetUser 按 open_id 查询单个成员，返回该成员在本应用下的标识与资料。
+// 供调用方在写入一条身份映射前确认该 open_id 真实存在于本应用通讯录。
+//
+// 查不到时返回 ErrUserNotFound（open_id 无效 / 用户已删除 / 不在应用通讯录
+// 权限范围内，见 codeUserIDInvalid 与 codeNoUserAuthority）；其余失败返回包装
+// 了 app 与 open_id 的错误。返回的用户 Source 恒为 SourceOwn——按 open_id 直查
+// 只能命中本应用自己的身份空间，关联组织视角的成员走不到这条链路。
+// 姓名、工号沿用 ListAllUsers 的字段权限前提：应用缺「获取用户基本信息」
+// 或「获取用户雇佣信息」权限时对应字段为空，不影响 open_id 与 user_id。
+func (c *Client) GetUser(ctx context.Context, openID string) (User, error) {
+	if openID == "" {
+		return User{}, gerror.Newf("larkcontact: 查询用户失败 app=%s：open_id 为空", c.appID)
+	}
+	req := contact.NewGetUserReqBuilder().
+		UserId(openID).
+		UserIdType("open_id").
+		DepartmentIdType("open_department_id").
+		Build()
+	resp, err := c.client.Contact.User.Get(ctx, req)
+	if err != nil {
+		return User{}, gerror.Wrapf(err, "larkcontact: 查询用户失败 app=%s open_id=%s", c.appID, openID)
+	}
+	if !resp.Success() {
+		if resp.Code == codeUserIDInvalid || resp.Code == codeNoUserAuthority {
+			return User{}, gerror.Wrapf(ErrUserNotFound,
+				"app=%s open_id=%s code=%d msg=%s", c.appID, openID, resp.Code, resp.Msg)
+		}
+		return User{}, gerror.Newf("larkcontact: 查询用户失败 app=%s open_id=%s req_id=%s code=%d msg=%s%s", c.appID, openID, resp.RequestId(), resp.Code, resp.Msg, utils.CodeErrorDetail(resp.CodeError))
+	}
+	u := resp.Data.User
+	if u == nil || u.OpenId == nil || *u.OpenId == "" {
+		// 接口成功但没带回 open_id：字段级读取权限缺失，按查不到处理，
+		// 避免调用方落一条 open_id 为空的脏映射。
+		return User{}, gerror.Wrapf(ErrUserNotFound, "app=%s open_id=%s 返回数据缺少 open_id", c.appID, openID)
+	}
+	out := User{OpenID: *u.OpenId, Source: SourceOwn}
+	if u.UserId != nil {
+		out.UserID = *u.UserId
+	}
+	if u.Name != nil {
+		out.Name = *u.Name
+	}
+	if u.EmployeeNo != nil {
+		out.EmployeeNo = *u.EmployeeNo
+	}
+	return out, nil
+}
 
 // ListAllUsers 枚举该飞书企业的全部通讯录成员，并按 open_id 去重。
 // open_id 或 name 为空的成员会被跳过（多为应用缺字段级读取权限所致），

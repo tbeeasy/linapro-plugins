@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -36,6 +37,14 @@ type fakeHTTP struct {
 	collabTenantCalls int
 	// shareCalls 记录每次 visible_organization 的 target_tenant_key（按调用顺序）。
 	shareCalls []string
+
+	// getUser 为 contact.User.Get 应返回的单个成员；nil 表示用 getUserCode 回放失败。
+	getUser *userJSON
+	// getUserCode/getUserMsg 是 contact.User.Get 返回的业务错误码与消息。
+	getUserCode int
+	getUserMsg  string
+	// getUserCalls 记录每次 contact.User.Get 请求的 user_id 路径参数。
+	getUserCalls []string
 }
 
 type deptJSON struct {
@@ -44,9 +53,10 @@ type deptJSON struct {
 }
 
 type userJSON struct {
-	OpenID *string `json:"open_id,omitempty"`
-	UserID *string `json:"user_id,omitempty"`
-	Name   *string `json:"name,omitempty"`
+	OpenID     *string `json:"open_id,omitempty"`
+	UserID     *string `json:"user_id,omitempty"`
+	Name       *string `json:"name,omitempty"`
+	EmployeeNo *string `json:"employee_no,omitempty"`
 }
 
 // collabEntityJSON 是 visible_organization 返回的一条关联组织实体：成员填 open_user_id
@@ -84,6 +94,24 @@ func (f *fakeHTTP) Do(req *http.Request) (*http.Response, error) {
 		out := map[string]any{
 			"code": 0, "msg": "success",
 			"data": map[string]any{"items": f.usersByDept[deptID], "has_more": false},
+		}
+		b, _ := json.Marshal(out)
+		return jsonResp(string(b)), nil
+	}
+
+	// 单个用户查询：路径形如 /open-apis/contact/v3/users/:user_id。
+	// 放在 find_by_department 之后匹配，避免被这一条前缀规则截走。
+	if strings.Contains(path, "/contact/v3/users/") {
+		userID := path[strings.LastIndex(path, "/")+1:]
+		f.getUserCalls = append(f.getUserCalls, userID)
+		if f.getUserCode != 0 {
+			out := map[string]any{"code": f.getUserCode, "msg": f.getUserMsg}
+			b, _ := json.Marshal(out)
+			return jsonResp(string(b)), nil
+		}
+		out := map[string]any{
+			"code": 0, "msg": "success",
+			"data": map[string]any{"user": f.getUser},
 		}
 		b, _ := json.Marshal(out)
 		return jsonResp(string(b)), nil
@@ -432,5 +460,85 @@ func TestListAllUsers_WithAssocRecursesDeptsAndGroups(t *testing.T) {
 	// 应发起 3 次 visible_organization：根部门、子部门、用户组。
 	if len(f.shareCalls) != 3 {
 		t.Fatalf("应发起 3 次 visible_organization, 实际 %d: %v", len(f.shareCalls), f.shareCalls)
+	}
+}
+
+// TestGetUser_ReturnsProfile 验证：按 open_id 直查返回本应用身份的成员资料
+// （open_id、user_id、姓名、工号），并带上 user_id_type=open_id 查询参数。
+func TestGetUser_ReturnsProfile(t *testing.T) {
+	f := &fakeHTTP{getUser: &userJSON{
+		OpenID:     strptr("ou_a"),
+		UserID:     strptr("uid_a"),
+		Name:       strptr("张三"),
+		EmployeeNo: strptr("GZ001"),
+	}}
+	c := newTestClient(f)
+
+	u, err := c.GetUser(context.Background(), "ou_a")
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	if u.OpenID != "ou_a" || u.UserID != "uid_a" || u.Name != "张三" || u.EmployeeNo != "GZ001" {
+		t.Fatalf("返回资料不符: %+v", u)
+	}
+	if u.Source != SourceOwn {
+		t.Errorf("直查所得身份 Source 应为 %q, got=%q", SourceOwn, u.Source)
+	}
+	if len(f.getUserCalls) != 1 || f.getUserCalls[0] != "ou_a" {
+		t.Fatalf("应以 open_id 作为路径参数查询一次, got=%v", f.getUserCalls)
+	}
+}
+
+// TestGetUser_MapsNotFoundCodes 验证两类「该 open_id 在本应用不可用」的错误码
+// 都归一到 ErrUserNotFound，供调用方直接拒绝写入而不重试。
+func TestGetUser_MapsNotFoundCodes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		code int
+		msg  string
+	}{
+		{"用户ID无效或已删除", codeUserIDInvalid, "user id invalid error"},
+		{"不在应用通讯录权限范围", codeNoUserAuthority, "no user authority error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newTestClient(&fakeHTTP{getUserCode: tc.code, getUserMsg: tc.msg})
+			if _, err := c.GetUser(context.Background(), "ou_x"); !errors.Is(err, ErrUserNotFound) {
+				t.Fatalf("应返回 ErrUserNotFound, got=%v", err)
+			}
+		})
+	}
+}
+
+// TestGetUser_OtherErrorNotMappedToNotFound 验证其它业务错误码不被误判为用户不存在
+// （否则会把限频/服务异常当成「身份无效」永久拒绝）。
+func TestGetUser_OtherErrorNotMappedToNotFound(t *testing.T) {
+	c := newTestClient(&fakeHTTP{getUserCode: 99991400, getUserMsg: "rate limited"})
+	_, err := c.GetUser(context.Background(), "ou_x")
+	if err == nil {
+		t.Fatal("应返回错误")
+	}
+	if errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("限频不应判为用户不存在: %v", err)
+	}
+}
+
+// TestGetUser_MissingOpenIDInResponse 验证接口成功但没回带 open_id（字段级读取权限缺失）
+// 时按查不到处理，避免调用方落一条 open_id 为空的脏映射。
+func TestGetUser_MissingOpenIDInResponse(t *testing.T) {
+	c := newTestClient(&fakeHTTP{getUser: &userJSON{UserID: strptr("uid_a"), Name: strptr("张三")}})
+	if _, err := c.GetUser(context.Background(), "ou_a"); !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("应返回 ErrUserNotFound, got=%v", err)
+	}
+}
+
+// TestGetUser_EmptyOpenIDRejected 验证空 open_id 直接拒绝，不打网络。
+func TestGetUser_EmptyOpenIDRejected(t *testing.T) {
+	f := &fakeHTTP{}
+	c := newTestClient(f)
+	if _, err := c.GetUser(context.Background(), ""); err == nil {
+		t.Fatal("空 open_id 应返回错误")
+	}
+	if len(f.getUserCalls) != 0 {
+		t.Fatalf("空 open_id 不应发起请求, got=%v", f.getUserCalls)
 	}
 }
