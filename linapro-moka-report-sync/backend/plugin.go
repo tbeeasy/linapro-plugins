@@ -37,8 +37,15 @@ func init() {
 
 // registerJobs 注册周期性的报表→多维表格同步任务。间隔读取一次用于构建
 // cron 表达式；凭据与映射在每次执行时都重新读取，因此后端修改无需重启即可生效。
+// sync_enabled=false 时直接返回，不声明任务（插件本身仍正常加载）。
 func registerJobs(ctx context.Context, registrar pluginhost.JobsRegistrar) error {
-	minutes := config.IntervalMinutes(ctx, registrar.Services())
+	services := registrar.Services()
+	if !config.SyncEnabled(ctx, services) {
+		logger.Infof(ctx, "linapro-moka-report-sync: sync_enabled=false，跳过报表同步任务注册")
+		return nil
+	}
+
+	minutes := config.IntervalMinutes(ctx, services)
 	pattern := fmt.Sprintf("0 */%d * * * *", minutes)
 
 	return registrar.AddWithMetadata(

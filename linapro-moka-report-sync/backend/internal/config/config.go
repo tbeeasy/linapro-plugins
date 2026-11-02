@@ -27,10 +27,14 @@ const (
 	keyMokaAPICodes   = "plugin.linapro-moka-report-sync.moka.apiCodes"
 
 	// linapro-moka-report-sync 插件配置键 —— 飞书凭据与同步设置。
-	keyLarkAppID      = "plugin.linapro-moka-report-sync.lark.appId"
-	keyLarkSecret     = "plugin.linapro-moka-report-sync.lark.appSecret"
-	keyTenantID       = "plugin.linapro-moka-report-sync.tenantId"
-	keyIntervalMin    = "plugin.linapro-moka-report-sync.intervalMinutes"
+	keyLarkAppID   = "plugin.linapro-moka-report-sync.lark.appId"
+	keyLarkSecret  = "plugin.linapro-moka-report-sync.lark.appSecret"
+	keyTenantID    = "plugin.linapro-moka-report-sync.tenantId"
+	keyIntervalMin = "plugin.linapro-moka-report-sync.intervalMinutes"
+	// sync_enabled 是本插件定时任务总开关，缺省 true。置 false 时插件仍正常加载，
+	// 只是不声明定时任务——用于本地开发，避免本地库被线上 Moka 报表数据覆盖。
+	// 注册时读取一次，改值需重启。
+	keySyncEnabled    = "plugin.linapro-moka-report-sync.sync_enabled"
 	keyReportMappings = "plugin.linapro-moka-report-sync.reportMappings"
 )
 
@@ -129,6 +133,20 @@ func IntervalMinutes(ctx context.Context, services capability.Services) int {
 		return defaultIntervalMin
 	}
 	return n
+}
+
+// SyncEnabled 读取同步任务总开关，缺省 true（线上不配也能跑）。
+// 置 false 时插件仍正常加载，只是不声明定时任务——用于本地开发，
+// 避免本地库被线上 Moka 报表数据覆盖。在任务注册阶段使用，改值需重启。
+func SyncEnabled(ctx context.Context, services capability.Services) bool {
+	if services == nil || services.HostConfig() == nil {
+		return true
+	}
+	enabled, err := services.HostConfig().Bool(ctx, keySyncEnabled, true)
+	if err != nil {
+		return true
+	}
+	return enabled
 }
 
 // Load 解析完整配置。缺少必需凭据时返回错误，以便调用方记录日志并跳过本轮同步。
