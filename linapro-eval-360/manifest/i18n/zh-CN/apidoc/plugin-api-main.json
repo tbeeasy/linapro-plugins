@@ -1,0 +1,75 @@
+{
+  "plugins": {
+    "linapro_eval_360": {
+      "api": {
+        "eval": {
+          "v1": {
+            "AddRelationItem": {
+              "fields": {
+                "evaluateeName": {
+                  "dc": "被评估人姓名，须唯一对应一名在职员工"
+                },
+                "evaluateeJobTitle": {
+                  "dc": "被评估人职务（可选，最多 100 字）；为空时已有被评估人保留原值"
+                },
+                "evaluateeDepartment": {
+                  "dc": "被评估人部门（可选，最多 200 字）；为空时已有被评估人保留原值"
+                },
+                "evaluatorName": {
+                  "dc": "评价者姓名，须唯一对应一名在职员工"
+                },
+                "roleName": {
+                  "dc": "角色名；归一化后复用已有角色，没有则新建"
+                }
+              }
+            },
+            "AddRelationReq": {
+              "fields": {
+                "items": {
+                  "dc": "待新增的评价关系，单次 1~500 条（超过 500 条以 EVAL360_RELATION_ITEMS_TOO_MANY 拒绝）；全部条目校验通过才在单事务内一次写入，否则不写入任何数据"
+                }
+              }
+            },
+            "AddRelationRes": {
+              "fields": {
+                "ids": {
+                  "dc": "新评价关系 id，顺序与请求 items 一致"
+                }
+              }
+            },
+            "PublishProjectRes": {
+              "fields": {
+                "failed": {
+                  "dc": "因推送未通过而未发布的问卷（按待发布顺序；无失败时为空数组），结构同一键发送"
+                }
+              }
+            },
+            "SendFailedItem": {
+              "fields": {
+                "employeeNos": {
+                  "dc": "该问卷内失败评价者的工号（评价者无工号时为其员工 EmpID）"
+                },
+                "questionnaireId": {
+                  "dc": "未发布的问卷 ID"
+                },
+                "reason": {
+                  "dc": "未发布原因：unreachable=干跑寻址发现该问卷有评价者在任何企业都无法接收飞书卡片（只属于该问卷的评价者未收到卡片）；push_failed=正式投递后该问卷仍有评价者未送达"
+                },
+                "title": {
+                  "dc": "问卷名称"
+                }
+              }
+            },
+            "SendProjectRes": {
+              "fields": {
+                "failed": {
+                  "dc": "因推送未通过而未发布的问卷（按待发布顺序；无失败时为空数组）"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

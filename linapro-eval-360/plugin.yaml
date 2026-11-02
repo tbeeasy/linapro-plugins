@@ -1,0 +1,142 @@
+# 插件唯一标识，必须在宿主和源码插件目录中保持唯一，并使用 `kebab-case` 命名风格。
+id: linapro-eval-360
+
+# 插件显示名称，用于插件管理页面、开发文档和展示。
+name: 360 度绩效测评
+
+# 插件语义化版本号，当前示例统一使用带 `v` 前缀的写法。
+version: v0.1.1
+
+# 插件类型枚举。`source` 表示随宿主源码编译交付；`dynamic` 表示作为运行时动态插件产物加载。
+type: source
+
+# 插件分发治理枚举。`managed` 表示本领域插件通过插件管理显式治理；它不是宿主关键 builtin，
+# 宿主启动不会自动安装。未安装或禁用时本插件能力 fail-closed。
+distribution: managed
+
+# 多租户作用域枚举。`platform_only` 表示平台级统一治理：问卷对所有租户员工通用，不做租户隔离。
+scope_nature: platform_only
+
+# 多租户支持标记。`true` 表示插件支持租户级安装、租户级启用与新租户开通策略治理。
+supports_multi_tenant: false
+
+# 默认安装模式枚举。`global` 表示全局统一安装启用；`tenant_scoped` 表示按租户独立启用或禁用。
+default_install_mode: global
+
+# 插件说明，概述 360 度绩效测评的能力边界。
+description: |
+  面向管理层 360 度绩效评估的插件：以评价关系（谁评谁）为脊柱，
+  支持项目→问卷→被评估人→评价关系四层结构、角色权重与发布校验、
+  Excel 全量导入与关系编辑器、二维题目可见性、飞书一键推送、
+  以及面向 HR 的按答案/按得分两张明细导出。
+
+# 插件作者或归属团队。
+author: linapro
+
+# 插件许可证标识。
+license: Apache-2.0
+
+# 插件依赖声明。`plugins` 声明插件间依赖。
+dependencies:
+  plugins:
+    # 员工认证（EmpAuth）与员工查询（empcap）。
+    - id: linapro-employee-core
+      version: ">=0.1.0"
+    # 飞书卡片投递（larkpushcap）：推送应用凭据、工号寻址与跨企业扇出。
+    - id: linapro-lark-push
+      version: ">=0.1.0"
+
+# 插件国际化配置。该配置与宿主 i18n 配置结构保持一致；启用后需提供对应语言资源。
+i18n:
+  enabled: true
+  default: zh-CN
+  locales:
+    - locale: en-US
+      nativeName: English
+    - locale: zh-CN
+      nativeName: 简体中文
+
+# 插件菜单声明列表，宿主按该列表同步菜单、权限和路由入口。
+menus:
+  # 360 测评独立一级目录（不挂系统监控，业务模块自成顶级）。
+  # 对齐 linapro-extlogin-core 的 auth-login 目录写法：type D、无 parent_key、
+  # 路径为裸段（与宿主 monitor/org 等顶级目录同风格），点击仅展开不下钻。
+  # sort 取 12：宿主稳定目录占用 1~8 与 10/11，sort=9 已被宿主 SQL 预留给
+  # linapro-extlogin-core 的 auth-login 目录（见 006-menu-role-management.sql），
+  # 故避让到 developer(11) 之后，留 9 给授权登录域。
+  - key: plugin:linapro-eval-360:eval
+    name: 360 测评
+    path: eval-360
+    icon: lucide:users-round
+    type: D
+    sort: 12
+    visible: 1
+    remark: 360 度绩效测评管理端入口
+  # 测评项目页：承载项目列表与项目详情，路由 /eval-360/projects。
+  - key: plugin:linapro-eval-360:eval:projects
+    parent_key: plugin:linapro-eval-360:eval
+    name: 测评项目
+    path: /eval-360/projects
+    component: system/plugin/dynamic-page
+    perms: eval:360:list
+    type: M
+    sort: 1
+    visible: 1
+    remark: 360 测评项目列表与详情
+  # 按钮权限点：项目管理操作（新建/编辑/删除/提前结束/重新开启）
+  - key: plugin:linapro-eval-360:eval:project-manage
+    parent_key: plugin:linapro-eval-360:eval:projects
+    name: 项目管理
+    perms: eval:360:project:manage
+    type: B
+    sort: 1
+  # 按钮权限点：问卷查看（问卷列表/分页/详情结构树）。
+  # 项目详情页会加载问卷卡片，需与 list 一并授予，否则进入项目即报 403。
+  - key: plugin:linapro-eval-360:eval:questionnaire-query
+    parent_key: plugin:linapro-eval-360:eval:projects
+    name: 问卷查看
+    perms: eval:360:query
+    type: B
+    sort: 2
+  # 按钮权限点：新建问卷（含复制问卷）。缺失此点会导致“新增问卷”直接 403。
+  - key: plugin:linapro-eval-360:eval:questionnaire-add
+    parent_key: plugin:linapro-eval-360:eval:projects
+    name: 新建问卷
+    perms: eval:360:add
+    type: B
+    sort: 3
+  # 按钮权限点：问卷结构编辑（问卷/维度/题目的增删改、清空作答）。
+  - key: plugin:linapro-eval-360:eval:questionnaire-edit
+    parent_key: plugin:linapro-eval-360:eval:projects
+    name: 问卷编辑
+    perms: eval:360:edit
+    type: B
+    sort: 4
+  # 按钮权限点：删除问卷。
+  - key: plugin:linapro-eval-360:eval:questionnaire-remove
+    parent_key: plugin:linapro-eval-360:eval:projects
+    name: 删除问卷
+    perms: eval:360:remove
+    type: B
+    sort: 5
+  # 按钮权限点：发布与推送（发布/取消发布单份问卷、发布项目全部未发布问卷、一键发送飞书）。
+  - key: plugin:linapro-eval-360:eval:publish
+    parent_key: plugin:linapro-eval-360:eval:projects
+    name: 发布与推送
+    perms: eval:360:publish
+    type: B
+    sort: 6
+  # 按钮权限点：评价关系导入与编辑
+  - key: plugin:linapro-eval-360:eval:relation-manage
+    parent_key: plugin:linapro-eval-360:eval:projects
+    name: 评价关系管理
+    perms: eval:360:relation:manage
+    type: B
+    sort: 7
+  # 按钮权限点：明细导出（按答案/按得分）
+  - key: plugin:linapro-eval-360:eval:export
+    parent_key: plugin:linapro-eval-360:eval:projects
+    name: 评估报告导出
+    perms: eval:360:export
+    type: B
+    sort: 8

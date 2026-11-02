@@ -1,0 +1,14 @@
+DROP TABLE IF EXISTS plugin_linapro_eval_360_answer;
+DROP TABLE IF EXISTS plugin_linapro_eval_360_submission;
+DROP TABLE IF EXISTS plugin_linapro_eval_360_relation;
+DROP TABLE IF EXISTS plugin_linapro_eval_360_evaluatee;
+DROP TABLE IF EXISTS plugin_linapro_eval_360_role;
+DROP TABLE IF EXISTS plugin_linapro_eval_360_matrix_column;
+DROP TABLE IF EXISTS plugin_linapro_eval_360_matrix_row;
+DROP TABLE IF EXISTS plugin_linapro_eval_360_question_option;
+DROP TABLE IF EXISTS plugin_linapro_eval_360_question_excluded_evaluator;
+DROP TABLE IF EXISTS plugin_linapro_eval_360_question_visibility;
+DROP TABLE IF EXISTS plugin_linapro_eval_360_question;
+DROP TABLE IF EXISTS plugin_linapro_eval_360_dimension;
+DROP TABLE IF EXISTS plugin_linapro_eval_360_questionnaire;
+DROP TABLE IF EXISTS plugin_linapro_eval_360_project;

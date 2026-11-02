@@ -1,0 +1,233 @@
+{
+  "error": {
+    "eval360": {
+      "dimension": {
+        "not": {
+          "empty": "Dimension still has questions; remove them first",
+          "found": "Dimension not found"
+        }
+      },
+      "edit": {
+        "requires": {
+          "strategy": "The questionnaire has answers; this change would corrupt historical answers. Use 'Clear Answers' or 'Copy Questionnaire' instead."
+        }
+      },
+      "empcap": {
+        "unbound": "Employee capability service is not ready"
+      },
+      "emp": {
+        "empcap": {
+          "unbound": "Employee capability service is not ready"
+        },
+        "empty": {
+          "submission": "The submission is empty or contains duplicate evaluatees"
+        },
+        "invalid": {
+          "answer": "Invalid answer for {evaluatee}"
+        },
+        "matrix": {
+          "comment": {
+            "required": "A comment is required for {evaluatee} on question \"{title}\""
+          }
+        },
+        "missing": {
+          "required": "Some required questions for {evaluatee} are unanswered"
+        },
+        "partially": {
+          "submitted": "Some evaluatees have already been submitted; please refresh and try again"
+        },
+        "project": {
+          "closed": "Evaluation has closed; submission rejected"
+        },
+        "questionnaire": {
+          "not": {
+            "found": "Questionnaire not found or not published"
+          }
+        },
+        "relation": {
+          "not": {
+            "found": "Evaluation relation not found or not yours"
+          }
+        }
+      },
+      "export": {
+        "excel": {
+          "failed": "Failed to export Excel"
+        },
+        "questionnaire": {
+          "not": {
+            "found": "Questionnaire not found"
+          }
+        }
+      },
+      "import": {
+        "empty": "No valid data rows in the import file",
+        "excel": {
+          "parse": {
+            "failed": "Failed to parse the relation import file"
+          }
+        },
+        "file": {
+          "required": "Please upload an import file"
+        },
+        "self": {
+          "evaluate": "Evaluatee and evaluator cannot be the same employee"
+        },
+        "sheet": {
+          "read": {
+            "failed": "Failed to read the import worksheet"
+          }
+        },
+        "header": {
+          "missing": "The import file is missing the required column \"{column}\"; please use the import template"
+        }
+      },
+      "invalid": {
+        "question": {
+          "type": "Invalid question type: only single-choice / short text / long text / matrix are supported"
+        },
+        "score": "Invalid score"
+      },
+      "matrix": {
+        "columns": {
+          "required": "A matrix question needs at least one evaluation column"
+        }
+      },
+      "notify": {
+        "card": {
+          "config": {
+            "missing": "Lark card push configuration is missing or invalid: {item}"
+          }
+        },
+        "empcap": {
+          "unbound": "Employee capability service is not ready; cannot push"
+        },
+        "evaluators": {
+          "unreachable": "{count} evaluator(s) cannot receive the Lark card; nothing was published: {list}"
+        },
+        "host": {
+          "config": {
+            "missing": "Host configuration capability is unavailable"
+          }
+        },
+        "lark": {
+          "push": {
+            "unbound": "Lark push capability is not ready; make sure linapro-lark-push is enabled"
+          }
+        },
+        "push": {
+          "failed": "Lark card delivery failed for {count} evaluator(s); nothing was published (evaluators who already received a card will get another one when you publish again): {list}"
+        }
+      },
+      "no": {
+        "roles": "The questionnaire has no roles. Import relations to generate roles and configure weights first."
+      },
+      "project": {
+        "closed": "Evaluation has closed; submission rejected",
+        "has": {
+          "empty": {
+            "questionnaire": "The project contains a questionnaire without questions; cannot send"
+          },
+          "published": {
+            "questionnaire": "The project has published questionnaires; unpublish them before deleting"
+          },
+          "submissions": "The project has submitted answers; clear them before deleting"
+        },
+        "not": {
+          "found": "Project not found"
+        },
+        "questionnaire": {
+          "not": {
+            "found": "Questionnaire not found"
+          }
+        },
+        "relation": {
+          "not": {
+            "found": "Evaluation relation not found"
+          }
+        },
+        "name": {
+          "exists": "This project name is already in use; please choose another",
+          "empty": "Project name cannot be empty"
+        }
+      },
+      "questionnaire": {
+        "not": {
+          "found": "Questionnaire not found",
+          "importable": "The questionnaire is published; full import is not allowed. Add relations in the relation list page."
+        },
+        "no": {
+          "questions": "The questionnaire has no questions; cannot publish"
+        },
+        "title": {
+          "exists": "A questionnaire with this name already exists in the project; please choose another",
+          "empty": "Questionnaire title cannot be empty"
+        }
+      },
+      "question": {
+        "dimension": {
+          "required": "A question must belong to a dimension"
+        },
+        "not": {
+          "found": "Question not found"
+        },
+        "order": {
+          "mismatch": "The question order does not match the questions in this dimension; please refresh and retry"
+        }
+      },
+      "relation": {
+        "has": {
+          "submission": "This relation already has answers. Clear answers or confirm before deleting."
+        },
+        "not": {
+          "found": "Evaluation relation not found"
+        },
+        "items": {
+          "empty": "Please fill in at least one evaluation relation",
+          "too": {
+            "many": "At most {max} evaluation relations can be added at once"
+          }
+        }
+      },
+      "evaluatee": {
+        "has": {
+          "submission": "This evaluatee already has answers. Clear answers before deleting."
+        }
+      },
+      "role": {
+        "name": {
+          "empty": "Role name cannot be empty"
+        },
+        "not": {
+          "empty": "The role still has relations; reassign them before deleting",
+          "found": "Role not found"
+        },
+        "has": {
+          "submission": "This role already has answers. Clear answers before deleting."
+        }
+      },
+      "single": {
+        "choice": {
+          "options": {
+            "required": "A single-choice question needs at least one option"
+          }
+        }
+      },
+      "weight": {
+        "missing": "Some roles have weight 0; set each role's weight greater than 0",
+        "sum": {
+          "invalid": "The sum of role weights must equal 100%"
+        }
+      },
+      "employee": {
+        "name": {
+          "empty": "Evaluatee and evaluator names are required",
+          "duplicate": "These names are shared by more than one active employee, so nothing was submitted: {names}",
+          "not": {
+            "found": "No active employee found for these names, so nothing was submitted: {names}"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,233 @@
+{
+  "error": {
+    "eval360": {
+      "dimension": {
+        "not": {
+          "empty": "维度下仍有题目，请先移除题目再删除维度",
+          "found": "维度不存在"
+        }
+      },
+      "edit": {
+        "requires": {
+          "strategy": "问卷已有作答，该操作会破坏历史答案，请改用「删除历史答案」或「复制问卷」"
+        }
+      },
+      "empcap": {
+        "unbound": "员工能力服务未就绪"
+      },
+      "emp": {
+        "empcap": {
+          "unbound": "员工能力服务未就绪"
+        },
+        "empty": {
+          "submission": "提交内容为空或包含重复的被评估人"
+        },
+        "invalid": {
+          "answer": "「{evaluatee}」的答案非法"
+        },
+        "matrix": {
+          "comment": {
+            "required": "「{evaluatee}」的题目「{title}」需要填写评语"
+          }
+        },
+        "missing": {
+          "required": "「{evaluatee}」存在未作答的必填题"
+        },
+        "partially": {
+          "submitted": "部分被评估人已提交，请刷新页面后重试"
+        },
+        "project": {
+          "closed": "评估已截止，不可提交"
+        },
+        "questionnaire": {
+          "not": {
+            "found": "问卷不存在或未发布"
+          }
+        },
+        "relation": {
+          "not": {
+            "found": "评价关系不存在或不属于当前员工"
+          }
+        }
+      },
+      "export": {
+        "excel": {
+          "failed": "导出 Excel 失败"
+        },
+        "questionnaire": {
+          "not": {
+            "found": "问卷不存在"
+          }
+        }
+      },
+      "import": {
+        "empty": "导入文件无有效数据行",
+        "excel": {
+          "parse": {
+            "failed": "评价关系导入文件解析失败"
+          }
+        },
+        "file": {
+          "required": "请上传评价关系导入文件"
+        },
+        "self": {
+          "evaluate": "被评估人与评价者不能为同一员工"
+        },
+        "sheet": {
+          "read": {
+            "failed": "评价关系导入工作表读取失败"
+          }
+        },
+        "header": {
+          "missing": "导入文件缺少必需列「{column}」，请使用导入模板"
+        }
+      },
+      "invalid": {
+        "question": {
+          "type": "题型非法：仅支持单选/单行文本/多行文本/矩阵"
+        },
+        "score": "分值非法"
+      },
+      "matrix": {
+        "columns": {
+          "required": "矩阵题至少需要一列评价项"
+        }
+      },
+      "notify": {
+        "card": {
+          "config": {
+            "missing": "飞书卡片推送配置缺失或无效：{item}"
+          }
+        },
+        "empcap": {
+          "unbound": "员工能力服务未就绪，无法推送"
+        },
+        "evaluators": {
+          "unreachable": "有 {count} 名评价者无法接收飞书卡片，本次未发布任何问卷：{list}"
+        },
+        "host": {
+          "config": {
+            "missing": "宿主配置能力不可用"
+          }
+        },
+        "lark": {
+          "push": {
+            "unbound": "飞书推送能力未就绪，请确认已启用 linapro-lark-push"
+          }
+        },
+        "push": {
+          "failed": "有 {count} 名评价者的飞书卡片发送失败，本次未发布任何问卷（已收到卡片的评价者重新发布时会再收到一张）：{list}"
+        }
+      },
+      "no": {
+        "roles": "问卷尚无角色，请先导入评价关系以生成角色并配置权重"
+      },
+      "project": {
+        "closed": "评估已截止，不可提交",
+        "has": {
+          "empty": {
+            "questionnaire": "项目内存在未配置题目的问卷，无法发送"
+          },
+          "published": {
+            "questionnaire": "项目下存在已发布问卷，删除前请先取消发布"
+          },
+          "submissions": "项目下存在已提交作答，删除前请先清空作答"
+        },
+        "not": {
+          "found": "项目不存在"
+        },
+        "questionnaire": {
+          "not": {
+            "found": "问卷不存在"
+          }
+        },
+        "relation": {
+          "not": {
+            "found": "评价关系不存在"
+          }
+        },
+        "name": {
+          "exists": "项目名称已存在，请换一个名称",
+          "empty": "项目名称不能为空"
+        }
+      },
+      "questionnaire": {
+        "not": {
+          "found": "问卷不存在",
+          "importable": "问卷已发布，不可全量导入，请在关系列表页新增评价关系"
+        },
+        "no": {
+          "questions": "问卷尚未配置题目，无法发布"
+        },
+        "title": {
+          "exists": "同一项目下已存在同名问卷，请换一个名称",
+          "empty": "问卷标题不能为空"
+        }
+      },
+      "question": {
+        "dimension": {
+          "required": "题目必须归属一个维度"
+        },
+        "not": {
+          "found": "题目不存在"
+        },
+        "order": {
+          "mismatch": "题目排序参数与当前维度下的题目不一致，请刷新后重试"
+        }
+      },
+      "relation": {
+        "has": {
+          "submission": "该评价关系已有作答，删除前请先清空作答或二次确认"
+        },
+        "not": {
+          "found": "评价关系不存在"
+        },
+        "items": {
+          "empty": "请至少填写一条评价关系",
+          "too": {
+            "many": "单次最多新增 {max} 条评价关系"
+          }
+        }
+      },
+      "evaluatee": {
+        "has": {
+          "submission": "该被评估人已有作答，删除前请先清空作答"
+        }
+      },
+      "role": {
+        "name": {
+          "empty": "角色名不能为空"
+        },
+        "not": {
+          "empty": "角色下仍有评价关系，请先改派后再删除",
+          "found": "角色不存在"
+        },
+        "has": {
+          "submission": "该角色下已有作答，删除前请先清空作答"
+        }
+      },
+      "single": {
+        "choice": {
+          "options": {
+            "required": "单选题至少需要一个选项"
+          }
+        }
+      },
+      "weight": {
+        "missing": "存在权重为 0 的角色，请先为每个角色填写大于 0 的权重",
+        "sum": {
+          "invalid": "各角色权重之和必须等于 100%"
+        }
+      },
+      "employee": {
+        "name": {
+          "empty": "被评估人与评价者姓名不能为空",
+          "duplicate": "以下姓名存在在职同名员工，无法确定是哪一位，未提交任何评价关系：{names}",
+          "not": {
+            "found": "找不到以下在职员工，未提交任何评价关系：{names}"
+          }
+        }
+      }
+    }
+  }
+}

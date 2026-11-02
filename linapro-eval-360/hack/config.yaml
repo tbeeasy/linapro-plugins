@@ -1,0 +1,41 @@
+gfcli:
+  gen:
+    dao:
+      - link: "pgsql:postgres:postgres@tcp(127.0.0.1:5432)/linapro?sslmode=disable"
+        path: "internal"
+        tables: >-
+          plugin_linapro_eval_360_project,
+          plugin_linapro_eval_360_questionnaire,
+          plugin_linapro_eval_360_dimension,
+          plugin_linapro_eval_360_question,
+          plugin_linapro_eval_360_question_visibility,
+          plugin_linapro_eval_360_question_excluded_evaluator,
+          plugin_linapro_eval_360_question_option,
+          plugin_linapro_eval_360_matrix_row,
+          plugin_linapro_eval_360_matrix_column,
+          plugin_linapro_eval_360_role,
+          plugin_linapro_eval_360_evaluatee,
+          plugin_linapro_eval_360_relation,
+          plugin_linapro_eval_360_submission,
+          plugin_linapro_eval_360_answer
+        removePrefix: "plugin_linapro_eval_360_"
+        importPrefix: "lina-plugin-linapro-eval-360/backend/internal"
+        descriptionTag: true
+        noModelComment: true
+        stdTime: true
+        typeMapping:
+          numeric:
+            type: "*decimal.Decimal"
+            import: github.com/shopspring/decimal
+          timestamp:
+            type: "*time.Time"
+            import: time
+          "timestamp without time zone":
+            type: "*time.Time"
+            import: time
+          timestamptz:
+            type: "*time.Time"
+            import: time
+          "timestamp with time zone":
+            type: "*time.Time"
+            import: time
