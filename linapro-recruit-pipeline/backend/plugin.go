@@ -54,8 +54,14 @@ func init() {
 }
 
 // registerJobs 注册四个流水线定时任务。
+// sync_enabled=false 时直接返回，一个任务都不声明（插件本身仍正常加载）。
 func registerJobs(ctx context.Context, registrar pluginhost.JobsRegistrar) error {
 	services := registrar.Services()
+	if !config.SyncEnabled(ctx, services) {
+		logger.Infof(ctx, "recruit-pipeline: sync_enabled=false，跳过全部定时任务注册")
+		return nil
+	}
+
 	candidatePollInterval := config.CandidatePollIntervalMinutes(ctx, services)
 	candidatePollTimeout := time.Duration(config.CandidatePollTimeoutMinutes(ctx, services)) * time.Minute
 	interviewSyncInterval := config.InterviewSyncIntervalMinutes(ctx, services)

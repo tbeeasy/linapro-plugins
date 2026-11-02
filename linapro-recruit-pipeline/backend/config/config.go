@@ -42,6 +42,11 @@ const (
 	// deadline，而单周期要串行下载/上传每个新候选人的简历附件，积压较多时会超过 5 分钟。此值在注册时
 	// 读取一次，用于在任务回调内以 WithoutCancel 解绑宿主 deadline 后重设更长超时，故放静态配置。
 	keyCandidatePollTimeoutMinutes = "plugin.linapro-recruit-pipeline.candidate_poll_timeout_minutes" // 候选人轮询单次执行超时（分钟），默认 defaultCandidatePollTimeoutMinutes
+
+	// sync_enabled 是本插件全部定时任务的总开关（候选人轮询 / AI 判定 / 面试同步 / 报表回写
+	// 一起开关），缺省 true。置 false 时插件仍正常加载，只是不声明任何定时任务——
+	// 用于本地开发，避免本地库被线上 Moka / Bitable 数据覆盖。注册时读取一次，改值需重启。
+	keySyncEnabled = "plugin.linapro-recruit-pipeline.sync_enabled"
 )
 
 // ============================================================================
@@ -324,6 +329,20 @@ func intervalMinutesOrDefault(ctx context.Context, services capability.Services,
 		return def
 	}
 	return n
+}
+
+// SyncEnabled 读取本插件定时任务总开关，缺省 true（线上不配也能跑）。
+// 置 false 时 registerJobs 不声明任何任务，插件其余能力（路由 / 菜单）不受影响。
+// 在任务注册阶段调用一次，改值需重启。
+func SyncEnabled(ctx context.Context, services capability.Services) bool {
+	if services == nil || services.HostConfig() == nil {
+		return true
+	}
+	enabled, err := services.HostConfig().Bool(ctx, keySyncEnabled, true)
+	if err != nil {
+		return true
+	}
+	return enabled
 }
 
 // Load 解析完整配置。必需凭证缺失时返回 error，调用方可据此记录日志并跳过本轮。
