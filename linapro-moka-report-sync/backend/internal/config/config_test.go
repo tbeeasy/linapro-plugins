@@ -178,3 +178,23 @@ func TestReportMapping_SkipIfAbsent(t *testing.T) {
 		t.Errorf("未提供 skipIf 时应为空, got %v", m.SkipIf)
 	}
 }
+
+// TestReportMapping_PersonFieldEmpNoSourcesUnmarshal 验证人员字段两种来源的 JSON 反序列化：
+// 工号来源与姓名来源各自就位、互不串扰，且姓名来源允许字段名与列名同名。
+func TestReportMapping_PersonFieldEmpNoSourcesUnmarshal(t *testing.T) {
+	raw := `{
+		"reportId": 1,
+		"personFieldEmpNoSources": {"负责人": "工号"},
+		"personFieldNameSources": {"面谈人 1": "面谈人 1"}
+	}`
+	var m ReportMapping
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		t.Fatalf("反序列化失败: %v", err)
+	}
+	if len(m.PersonFieldEmpNoSources) != 1 || m.PersonFieldEmpNoSources["负责人"] != "工号" {
+		t.Errorf("工号来源解析有误: %v", m.PersonFieldEmpNoSources)
+	}
+	if len(m.PersonFieldNameSources) != 1 || m.PersonFieldNameSources["面谈人 1"] != "面谈人 1" {
+		t.Errorf("姓名来源解析有误: %v", m.PersonFieldNameSources)
+	}
+}

@@ -40,12 +40,16 @@ func NewRunner(services capability.Services) *Runner {
 // MappingResult 汇总单个报表映射的同步结果。
 type MappingResult struct {
 	ReportID int64
+	Label    string // 映射的日志标识（remark + reportId），用于周期末汇总告警
 	Created  int
 	Updated  int
 	Frozen   int
 	Skipped  int
 	Filtered int // 被 skipIf 行过滤丢弃的行数（仅 flat 形态）
-	Err      error
+	// DuplicateNames 是姓名来源人员列中因在职员工重名而留空的姓名（仅 flat 形态），
+	// 由 RunOnce 在周期末汇总告警。
+	DuplicateNames []string
+	Err            error
 }
 
 // RunOnce 加载配置并同步每一个已配置的报表映射。单个映射失败会被记录，
@@ -112,6 +116,7 @@ func (r *Runner) RunOnce(ctx context.Context) ([]MappingResult, error) {
 		}
 		results = append(results, res)
 	}
+	r.notifyNameDuplicates(ctx, results)
 	return results, nil
 }
 
@@ -130,7 +135,7 @@ func (r *Runner) syncMapping(
 	resolver func(employeeNos []string) []string,
 	m config.ReportMapping,
 ) MappingResult {
-	res := MappingResult{ReportID: m.ReportID}
+	res := MappingResult{ReportID: m.ReportID, Label: mappingLabel(m)}
 
 	// 从对应数据源拉取报表数据。
 	var data *syncer.ReportData
@@ -245,10 +250,13 @@ func (r *Runner) syncMappingFlat(
 	// 会在 diffFields 里与毫秒字符串比较永远不相等，导致同值每轮被误判为更新。
 	// 当前仅日期列会归一，文本/数字/人员等列不受影响；解析失败的值保留原样。
 	normalizeColumns(rows, fieldTypes)
-	// 人员列必须在规划前把人员字段值替换为对应工号（逗号拼接多工号）：PersonFieldSources 声明
-	// 「Bitable 人员字段名 → Moka 工号列名」；未配置的人员字段清空，使 Plan 忽略该列。
+	// 人员列必须在规划前把人员字段值替换为对应工号（逗号拼接多工号）：PersonFieldEmpNoSources 声明
+	// 「Bitable 人员字段名 → Moka 工号列名」，PersonFieldNameSources 声明「→ Moka 姓名列名」
+	// （姓名先在此按员工目录批量换成工号）；未配置的人员字段清空，使 Plan 忽略该列。
 	// 工号能否解析为当前应用作用域的 open_id 由 Plan 内 resolvePersonCols 判断，不在此预解析。
-	preparePersonFields(rows, fieldTypes, m.PersonFieldSources)
+	names := resolvePersonNames(ctx, mappingLabel(m), rows, fieldTypes, m)
+	res.DuplicateNames = names.duplicates
+	preparePersonFields(rows, fieldTypes, m.PersonFieldEmpNoSources, m.PersonFieldNameSources, names.employeeNos)
 
 	plan := syncer.Plan(syncer.PlanInput{
 		Key:         spec,
@@ -348,37 +356,6 @@ func toSkipRules(ctx context.Context, label string, rules []config.SkipRule) []s
 		})
 	}
 	return out
-}
-
-// preparePersonFields 把人员字段的值换成其工号来源列的值，交给 Plan 统一解析为 open_id：
-// 人员列不能直接把工号文本交给共享库（飞书人员字段只接受用户 id）。PersonFieldSources 声明
-// 「Bitable 人员字段名 → Moka 报表工号列名」；未在 PersonFieldSources 中声明的人员字段直接
-// 清空，不参与本轮写入。
-//
-// 工号能否解析到 open_id 不在此判断：Plan 内 resolvePersonCols 会对每个人员列解析一次，解析
-// 为空的列自然不写（project 已把人员列排除出 Fields、resolvePersonCols 跳过空集合），与在此
-// 预清空等价。故这里只做「取工号来源列的值」这一步搬运，不再调用解析器预解析一次——保证全链路
-// 对同一工号只解析一次（解析器虽是闭包内存查找、二次调用廉价，但仍属重复的身份解析动作）。
-func preparePersonFields(
-	rows []syncer.Row,
-	fieldTypes map[string]int,
-	personFieldSources map[string]string,
-) {
-	for _, row := range rows {
-		for fieldName := range row {
-			if fieldTypes[fieldName] != larkbitablesdk.TypeUser {
-				continue
-			}
-			empNoCol, declared := personFieldSources[fieldName]
-			if !declared {
-				// 未声明工号来源列的人员字段，本轮跳过。
-				row[fieldName] = ""
-				continue
-			}
-			// 把人员字段值替换为工号来源列的值，Plan 以工号查 open_id（空工号由 Plan 跳过）。
-			row[fieldName] = row[empNoCol]
-		}
-	}
 }
 
 // normalizeColumns 根据 fieldTypes 对需要规一的列做归一（调用 syncer.NormalizeColumns），
@@ -577,7 +554,7 @@ func missingPivotColumns(pivotCols []string, tableFields map[string]struct{}) []
 // 做转置，再复用现有 Plan/BatchCreate/BatchUpdate 写入 Bitable。
 //
 //   - 3.2：PivotHeaderColumn / PivotIndexColumn 为空或源报表无 headerColumn 列时记 warn 并跳过本轮映射。
-//   - 3.3：DerivedColumns 与 PersonFieldSources 非空时忽略并记 warn。
+//   - 3.3：DerivedColumns、PersonFieldEmpNoSources 与 PersonFieldNameSources 非空时忽略并记 warn。
 //   - 3.4：headerColumn 值重复冲突按 Coalesce 风格记 warn。
 func (r *Runner) syncMappingPivot(
 	ctx context.Context,
@@ -601,15 +578,18 @@ func (r *Runner) syncMappingPivot(
 		return res
 	}
 
-	// 3.3：pivot 不支持 DerivedColumns 与 PersonFieldSources，有配置时忽略并告警。
+	// 3.3：pivot 不支持 DerivedColumns、PersonFieldEmpNoSources 与 PersonFieldNameSources，有配置时忽略并告警。
 	if len(m.DerivedColumns) > 0 {
 		logger.Warningf(ctx, "%s %s pivot 形态不支持 derivedColumns，已忽略", logTag, label)
 	}
-	if len(m.PersonFieldSources) > 0 {
-		logger.Warningf(ctx, "%s %s pivot 形态不支持 personFieldSources，已忽略", logTag, label)
+	if len(m.PersonFieldEmpNoSources) > 0 {
+		logger.Warningf(ctx, "%s %s pivot 形态不支持 personFieldEmpNoSources，已忽略", logTag, label)
+	}
+	if len(m.PersonFieldNameSources) > 0 {
+		logger.Warningf(ctx, "%s %s pivot 形态不支持 personFieldNameSources，已忽略", logTag, label)
 	}
 	// pivot 形态本次不接入 skipIf（行过滤语义需作用于转置前的月份行，与 flat 不同，属独立需求）。
-	// 沿用 derivedColumns / personFieldSources 的「忽略 + 告警」先例，配置了也不因此失败。
+	// 沿用 derivedColumns / personFieldEmpNoSources 的「忽略 + 告警」先例，配置了也不因此失败。
 	if len(m.SkipIf) > 0 {
 		logger.Warningf(ctx, "%s %s pivot 形态不支持 skipIf 行过滤，已忽略", logTag, label)
 	}

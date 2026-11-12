@@ -38,6 +38,10 @@ const (
 	keyReportMappings = "plugin.linapro-moka-report-sync.reportMappings"
 )
 
+// AlertConfigKey 是本插件运维告警通道的配置键（由 larkalert 读取，凭据引用宿主 _anchors.ops_alert）；
+// 未配置时告警只落日志、不推群。
+const AlertConfigKey = "plugin.linapro-moka-report-sync.alert"
+
 const (
 	defaultTenantID     = 1
 	defaultIntervalMin  = 5
@@ -99,8 +103,12 @@ type ReportMapping struct {
 	// 源报表读哪一列的行值当列头由 PivotHeaderColumn 决定，指标名写进哪一列去和目标表对齐由
 	// 本字段决定；二者常不同名。缺省不回退到 PivotHeaderColumn，未声明时 pivot 映射本轮跳过。
 	PivotIndexColumn string `json:"pivotIndexColumn,omitempty"`
-	// PersonFieldSources 声明「Bitable 人员字段名 → Moka 报表工号列名」的映射。
-	PersonFieldSources map[string]string `json:"personFieldSources,omitempty"`
+	// PersonFieldEmpNoSources 声明「Bitable 人员字段名 → Moka 报表工号列名」的映射。
+	PersonFieldEmpNoSources map[string]string `json:"personFieldEmpNoSources,omitempty"`
+	// PersonFieldNameSources 声明「Bitable 人员字段名 → Moka 报表姓名列名」的映射，用于报表只给
+	// 姓名、不给工号的人员列：姓名先按员工目录换成工号，再走与 PersonFieldEmpNoSources 相同的解析链路。
+	// 同一字段两边都声明时以 PersonFieldEmpNoSources（工号）为准。
+	PersonFieldNameSources map[string]string `json:"personFieldNameSources,omitempty"`
 	// DerivedColumns 列派生规则，在 Plan 前执行。
 	DerivedColumns []DerivedColumn `json:"derivedColumns,omitempty"`
 	// SkipIf 行过滤规则，在列派生之后、Coalesce 之前执行；任一规则命中即丢弃该行。

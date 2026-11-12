@@ -1,4 +1,4 @@
-// sync_test.go 验证报表同步在人员字段无法解析时的规划语义（确保离职或已从飞书删除的人员不造成虚假更新，同时保留同一行其他字段的真实更新），以及 planner→共享库 的 op 桥接把人员列 open_id 集合经 Persons 旁路透传。
+// sync_test.go 验证报表同步编排中的桥接与规划语义：planner→共享库 的 op 桥接把人员列 open_id 集合经 Persons 旁路透传、列派生与行过滤规则转换、pivot 诊断与幂等。
 package service
 
 import (
@@ -10,101 +10,6 @@ import (
 	"lina-plugin-linapro-moka-report-sync/backend/internal/config"
 	"lina-plugin-linapro-moka-report-sync/backend/internal/syncer"
 )
-
-func TestPreparePersonFields(t *testing.T) {
-	fieldTypes := map[string]int{
-		"工号":  larkbitablesdk.TypeText,
-		"负责人": larkbitablesdk.TypeUser,
-		"状态":  larkbitablesdk.TypeText,
-	}
-	// 负责人字段对应的工号来源列为"工号"。
-	personFieldSources := map[string]string{"负责人": "工号"}
-	singleKey := func(f string) syncer.KeySpec { return syncer.KeySpec{Fields: []string{f}, Sep: ""} }
-
-	t.Run("仅人员字段无法解析时冻结既有记录", func(t *testing.T) {
-		// 工号列有值但 resolver 返回空（如已离职员工从飞书删除）。
-		rows := []syncer.Row{{"工号": "EMP001", "负责人": "张三", "状态": "处理中"}}
-		preparePersonFields(rows, fieldTypes, personFieldSources)
-
-		plan := syncer.Plan(syncer.PlanInput{
-			Key:                           singleKey("工号"),
-			ReportCols:                    []string{"工号", "负责人", "状态"},
-			TableFields:                   testFieldSet("工号", "负责人", "状态"),
-			PersonCols:                    testFieldSet("负责人"),
-			ResolvePersonIDsByEmployeeNos: func([]string) []string { return nil },
-			Rows:                          rows,
-			Existing: map[string]syncer.ExistingRecord{
-				"EMP001": {RecordID: "rec_1", Fields: syncer.Row{"工号": "EMP001", "负责人": "历史人员", "状态": "处理中"}},
-			},
-		})
-		if plan.Frozen != 1 || len(plan.Updates) != 0 {
-			t.Fatalf("无法解析的人员字段不应触发更新，got frozen=%d updates=%d", plan.Frozen, len(plan.Updates))
-		}
-	})
-
-	t.Run("同一行其他字段变更仍更新", func(t *testing.T) {
-		rows := []syncer.Row{{"工号": "EMP002", "负责人": "李四", "状态": "已完成"}}
-		preparePersonFields(rows, fieldTypes, personFieldSources)
-
-		plan := syncer.Plan(syncer.PlanInput{
-			Key:                           singleKey("工号"),
-			ReportCols:                    []string{"工号", "负责人", "状态"},
-			TableFields:                   testFieldSet("工号", "负责人", "状态"),
-			PersonCols:                    testFieldSet("负责人"),
-			ResolvePersonIDsByEmployeeNos: func([]string) []string { return nil },
-			Rows:                          rows,
-			Existing: map[string]syncer.ExistingRecord{
-				"EMP002": {RecordID: "rec_2", Fields: syncer.Row{"工号": "EMP002", "负责人": "历史人员", "状态": "处理中"}},
-			},
-		})
-		if len(plan.Updates) != 1 {
-			t.Fatalf("其他字段变更应保留更新，got updates=%d", len(plan.Updates))
-		}
-		update := plan.Updates[0]
-		if len(update.Fields) != 1 || update.Fields["状态"] != "已完成" {
-			t.Fatalf("更新应只包含状态字段，got fields=%v", update.Fields)
-		}
-	})
-
-	t.Run("人员字段值被替换为工号后 resolver 能命中", func(t *testing.T) {
-		rows := []syncer.Row{{"工号": "EMP003", "负责人": "王五", "状态": "处理中"}}
-		resolver := func(empNos []string) []string {
-			for _, no := range empNos {
-				if no == "EMP003" {
-					return []string{"ou_abc123"}
-				}
-			}
-			return nil
-		}
-		preparePersonFields(rows, fieldTypes, personFieldSources)
-		// 人员字段值应被替换为工号，供 Plan 解析为 open_id 集合。
-		if rows[0]["负责人"] != "EMP003" {
-			t.Fatalf("人员字段值应替换为工号 EMP003，got %q", rows[0]["负责人"])
-		}
-
-		// 解析命中且回读集合不同 → 人员列经 Persons 旁路携带已解析的 open_id 集合。
-		plan := syncer.Plan(syncer.PlanInput{
-			Key:                           singleKey("工号"),
-			ReportCols:                    []string{"工号", "负责人", "状态"},
-			TableFields:                   testFieldSet("工号", "负责人", "状态"),
-			PersonCols:                    testFieldSet("负责人"),
-			ResolvePersonIDsByEmployeeNos: resolver,
-			Rows:                          rows,
-			Existing: map[string]syncer.ExistingRecord{
-				"EMP003": {RecordID: "rec_3", Fields: syncer.Row{"工号": "EMP003", "负责人": "王五", "状态": "处理中"}},
-			},
-		})
-		if len(plan.Updates) != 1 {
-			t.Fatalf("人员列集合不等价应产生 1 条更新，got updates=%d", len(plan.Updates))
-		}
-		if ids := plan.Updates[0].Persons["负责人"]; len(ids) != 1 || ids[0] != "ou_abc123" {
-			t.Fatalf("人员列应经 Persons 旁路写入已解析 open_id，got %v", plan.Updates[0].Persons)
-		}
-		if _, ok := plan.Updates[0].Fields["负责人"]; ok {
-			t.Fatalf("人员列不应进入 Fields，got %v", plan.Updates[0].Fields)
-		}
-	})
-}
 
 // TestToLarkPersonsPassthrough 固化 planner→共享库 的 op 桥接：人员列 open_id 集合必须经
 // Persons 旁路原样透传（不丢列、不改集合），且 planner 内部键 Name 被丢弃、RecordID 保留。

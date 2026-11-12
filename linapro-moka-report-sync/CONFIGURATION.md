@@ -83,6 +83,41 @@
 > （`2006`）、`招聘月份`（`1月`）是展示/建键用的文本，不适合作 `before` 比较。若要按派生列过滤，应先
 > 派生出一个日期形状（如 `Y-m`）的列再引用它。
 
+### 人员字段（仅 flat 形态）
+
+目标 Bitable 的人员字段只接受飞书用户 id，不能直接写工号或姓名文本。插件先把人员字段的值换成工号，再按工号查出该员工在写表格应用下的`open_id`写入。工号从哪一列来，由下面两个配置之一声明：
+
+| 字段 | 说明 |
+|---|---|
+| `personFieldEmpNoSources` | `Bitable 人员字段名 → Moka 报表工号列名`。工号列可用英文逗号拼接多个工号，写成多人 |
+| `personFieldNameSources` | `Bitable 人员字段名 → Moka 报表姓名列名`。适用于报表只给姓名、不给工号的列；一个单元格只按一个姓名处理 |
+
+```json
+{
+  "personFieldEmpNoSources": { "负责人": "负责人工号" },
+  "personFieldNameSources": { "面谈人 1": "面谈人 1", "面谈人 2": "面谈人 2" }
+}
+```
+
+姓名来源列按员工目录（`linapro-employee-core`）匹配：
+
+- **匹配方式**：只去掉首尾空白后精确匹配，不做大小写、全半角或简繁归一。
+- **只认在职员工**：只匹配到离职员工、或目录里没有这个姓名时，该单元格留空，并记 warn。
+- **同一人多行算一人**：同一自然人在两个租户各有一行时工号相同，不算重名。
+- **重名不猜人**：去重后有多名在职员工同名时，该单元格留空，并推送运维告警（见下）。
+- **两边都声明时以工号为准**：同一人员字段同时出现在两个配置里，按工号来源处理，并记 warn。
+- **未声明的人员字段不写**：两个配置都没有提到的人员字段，本轮跳过。
+
+**重名告警**：一轮同步里所有映射遇到的重名姓名，会汇总成一条消息推到运维告警群，按映射分组列出姓名。告警通道读宿主配置`plugin.linapro-moka-report-sync.alert`，凭据登记在`_anchors.ops_alert`：
+
+```yaml
+plugin:
+  linapro-moka-report-sync:
+    alert: *ops_alert
+```
+
+未配置时只写日志、不推群。同类告警在防抖窗口（`interval`，缺省`30m`）内只推一次；重名不修正时每轮同步都会再提醒。
+
 ### 转置同步（shape: pivot）
 
 适用于「Moka 报表行列与目标 Bitable 行列方向相反」的场景。
@@ -128,7 +163,7 @@
 | `keySeparator` | 复合键分隔符，单列键可保留默认 `"-"` |
 
 **pivot 形态的约束：**
-- `derivedColumns` 与 `personFieldSources` 在 pivot 形态下不生效；若配置则忽略并记录 warn。
+- `derivedColumns`、`personFieldEmpNoSources`与`personFieldNameSources`在 pivot 形态下不生效；若配置则忽略并记录 warn。
 - `skipIf` 行过滤在 pivot 形态下不生效；若配置则忽略并记录 warn。
 - `pivotHeaderColumn` 或 `pivotIndexColumn` 未配置、或源报表中不存在 `pivotHeaderColumn` 列时，本轮该映射被跳过（记 warn），其他映射照常执行。
 - 目标 Bitable 表中不存在的月份列值会被忽略（记 warn），不阻断同步。
