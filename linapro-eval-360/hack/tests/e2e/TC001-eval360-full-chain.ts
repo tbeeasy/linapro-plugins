@@ -94,6 +94,7 @@ test.describe('TC-1 360 测评全链路（建卷→导入→发布→作答→�
           role: '管理员',
           jobTitle: '销售总监',
           department: '华东销售部',
+          workProject: '星火项目',
         },
       ]);
       const importResponse = adminPage.waitForResponse(
@@ -106,23 +107,27 @@ test.describe('TC-1 360 测评全链路（建卷→导入→发布→作答→�
       expect(importBody.data.success).toBe(1);
       expect(importBody.data.fail).toBe(0);
 
-      // FB-13：导入的被评估人职务/部门在明细表「被评估人」列之后以两列展示（表头为译文）。
+      // FB-13 / FB-2：导入的被评估人职务/部门/项目在明细表「被评估人」列之后以三列展示（表头为译文）。
       await page.closeImportModal();
       const headerTitles = (await page.relationMatrixHeaders().allInnerTexts()).map((t: string) => t.trim());
-      expect(headerTitles.slice(0, 3)).toEqual(['被评估人', '被评估人职务', '被评估人部门']);
+      expect(headerTitles.slice(0, 4)).toEqual(['被评估人', '被评估人职务', '被评估人部门', '项目']);
       const importedRow = page.evaluateeRow(evaluatee!.name);
       await expect(importedRow.getByTestId('eval360-relation-evaluateeJobTitle')).toHaveText('销售总监');
       await expect(importedRow.getByTestId('eval360-relation-evaluateeDepartment')).toHaveText(
         '华东销售部',
       );
+      await expect(importedRow.getByTestId('eval360-relation-evaluateeWorkProject')).toHaveText(
+        '星火项目',
+      );
 
-      // FB-13：导出关系与导入模板同列，并回填被评估人职务/部门。
+      // FB-13 / FB-2：导出关系与导入模板同列，并回填被评估人职务/部门/项目。
       const relationSheet = readXlsxSheet(await page.exportRelations());
       expect(relationSheet.header).toEqual([
         '被评估人姓名',
         '被评估人工号',
         '被评估人职务',
         '被评估人部门',
+        '项目',
         '评价者姓名',
         '评价者工号',
         '角色',
@@ -132,6 +137,7 @@ test.describe('TC-1 360 测评全链路（建卷→导入→发布→作答→�
       expect(exported['被评估人工号']).toBe(evaluatee!.employeeNo);
       expect(exported['被评估人职务']).toBe('销售总监');
       expect(exported['被评估人部门']).toBe('华东销售部');
+      expect(exported['项目']).toBe('星火项目');
 
       // 角色由导入生成、默认权重 0 → 权重不合规，发布必须被拦截。
       await page.openTab('问卷');
@@ -230,18 +236,20 @@ test.describe('TC-1 360 测评全链路（建卷→导入→发布→作答→�
 
       // 回归（FB-11）：经被评估人行「新增」按名称新建的角色，紧接着在该角色单元格点「编辑」
       // 补录评价人，提交须携带该角色名（修复前编辑弹窗取不到新角色，提交报「需要输入角色」）。
-      // FB-13：行内「新增」弹窗须预填该被评估人的职务/部门，并随新增请求原样提交。
+      // FB-13 / FB-2：行内「新增」弹窗须预填该被评估人的职务/部门/项目，并随新增请求原样提交。
       const rowAddRequest = adminPage.waitForRequest(
         (req) => /\/relation$/.test(new URL(req.url()).pathname) && req.method() === 'POST',
       );
       await page.addRelationForEvaluatee(evaluatee!.name, peerA!, '同事', {
         jobTitle: '销售总监',
         department: '华东销售部',
+        workProject: '星火项目',
       });
       // FB-32：请求只带姓名，不带工号。
       const rowAddItem = (await rowAddRequest).postDataJSON().items[0];
       expect(rowAddItem.evaluateeJobTitle).toBe('销售总监');
       expect(rowAddItem.evaluateeDepartment).toBe('华东销售部');
+      expect(rowAddItem.evaluateeWorkProject).toBe('星火项目');
       expect(rowAddItem.evaluatorName).toBe(peerA!.name);
       expect(rowAddItem).not.toHaveProperty('evaluatorNo');
       expect(rowAddItem).not.toHaveProperty('evaluateeNo');

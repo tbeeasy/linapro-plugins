@@ -8,15 +8,18 @@ package testkit
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 
 	_ "lina-core/pkg/dbdriver"
+	"lina-core/pkg/dialect"
 )
 
 // envDatabaseDSN 是集成测试使用的数据库连接串环境变量。
@@ -26,7 +29,7 @@ const envDatabaseDSN = "LINA_TEST_DATABASE_DSN"
 // defaultDatabaseDSN 是本地开发库的连接串回退值。
 const defaultDatabaseDSN = "pgsql:postgres:postgres@tcp(127.0.0.1:5432)/linapro?sslmode=disable"
 
-// Setup 把包测试指向真实数据库、确保生产 schema 已建表，并注册关闭与配置还原的清理。
+// Setup 把包测试指向真实数据库、按序执行全部安装 SQL，并注册关闭与配置还原的清理。
 // 每个调用 Setup 的测试都会得到独立、无序安全的数据库环境。
 func Setup(t *testing.T) context.Context {
 	t.Helper()
@@ -45,9 +48,8 @@ func Setup(t *testing.T) context.Context {
 
 	ctx := context.Background()
 	db := g.DB()
-	schema := productionSchema(t)
-	if _, err := db.Exec(ctx, schema); err != nil {
-		t.Fatalf("建表失败（schema 与 manifest/sql/001-linapro-eval-360-schema.sql 同源）：%v", err)
+	if err := installSchema(ctx, t); err != nil {
+		t.Fatalf("建立生产 schema 失败：%v", err)
 	}
 	if err := ensureEmployeeTables(ctx); err != nil {
 		t.Fatalf("建员工表失败：%v", err)
@@ -64,23 +66,57 @@ func Setup(t *testing.T) context.Context {
 	return ctx
 }
 
-// productionSchema 读取随插件交付的生产建表脚本（单一事实来源，避免测试 DDL 漂移）。
-// 测试二进制的工作目录是包目录，故按 runtime.Caller 定位插件根下的 manifest/sql。
-func productionSchema(t *testing.T) string {
+// installSchema 与宿主安装插件同口径：按文件名顺序逐个执行 manifest/sql/ 下的安装 SQL。
+//
+// 只跑 001 会让后加列（如 008 的 work_project）在全新库上缺失——本地开发库因执行过全部迁移
+// 才不暴露该问题。每个文件内部按分号切分逐条执行，切分复用宿主 dialect 实现，
+// 以正确处理 002 中 DO $$ ... $$ 内的分号。
+func installSchema(ctx context.Context, t *testing.T) error {
 	t.Helper()
+	schemaDir, err := installSchemaDir()
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(schemaDir)
+	if err != nil {
+		return gerror.Wrapf(err, "读取安装 SQL 目录失败：%s", schemaDir)
+	}
+	var files []string
+	for _, entry := range entries {
+		// 仅取目录下的安装 SQL；uninstall/、mock-data/ 是子目录，在此被排除。
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		files = append(files, entry.Name())
+	}
+	if len(files) == 0 {
+		return gerror.Newf("安装 SQL 目录下没有 .sql 文件：%s", schemaDir)
+	}
+	// ReadDir 已按文件名升序返回，序号前缀保证 001→00N 的执行顺序。
+	for _, name := range files {
+		content, readErr := readFile(filepath.Join(schemaDir, name))
+		if readErr != nil {
+			return gerror.Wrapf(readErr, "读取安装 SQL 失败：%s", name)
+		}
+		for index, statement := range dialect.SplitSQLStatements(content) {
+			if _, execErr := g.DB().Exec(ctx, statement); execErr != nil {
+				return gerror.Wrapf(execErr, "执行安装 SQL %s 第 %d 条失败", name, index+1)
+			}
+		}
+	}
+	return nil
+}
+
+// installSchemaDir 返回插件安装 SQL 目录（单一事实来源，避免测试 DDL 漂移）。
+// 测试二进制的工作目录是包目录，故按 runtime.Caller 定位插件根下的 manifest/sql。
+func installSchemaDir() (string, error) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
-		t.Fatal("无法定位测试源码路径")
+		return "", gerror.New("无法定位测试源码路径")
 	}
 	// <plugin-root>/backend/internal/service/testkit/testkit.go → <plugin-root>
 	pluginRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..")
-	schemaPath := filepath.Join(pluginRoot, "manifest", "sql", "001-linapro-eval-360-schema.sql")
-	data, err := readFile(schemaPath)
-	if err != nil {
-		t.Fatalf("读取生产 schema 失败（%s）：%v", schemaPath, err)
-	}
-	// 建表脚本不含事务包裹，直接执行即可；pg 驱动按分号切分多条语句。
-	return data
+	return filepath.Join(pluginRoot, "manifest", "sql"), nil
 }
 
 // ensureEmployeeTables 确保 empcap 员工表存在（工号解析依赖真实员工行）。

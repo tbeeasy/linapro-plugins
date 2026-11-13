@@ -71,25 +71,27 @@ export function rowByHeader(sheet: ParsedSheet, row: string[]): Record<string, s
   return out;
 }
 
-/** 评价关系导入行：被评估人 / 评价者取自在职员工（导入只写姓名，工号仅用于断言），职务/部门可选。 */
+/** 评价关系导入行：被评估人 / 评价者取自在职员工（导入只写姓名，工号仅用于断言），职务/部门/项目可选。 */
 export interface RelationImportRow {
   evaluatee: { employeeNo: string; name: string };
   evaluator: { employeeNo: string; name: string };
   role: string;
   jobTitle?: string;
   department?: string;
+  workProject?: string;
 }
 
 // buildRelationWorkbook 生成与生产模板同结构的评价关系导入 xlsx
-//（列：被评估人姓名 / 被评估人职务 / 被评估人部门 / 评价者姓名 / 角色；不含工号，后端按姓名匹配），
+//（列：被评估人姓名 / 被评估人职务 / 被评估人部门 / 项目 / 评价者姓名 / 角色；不含工号，后端按姓名匹配），
 // 返回落盘路径。
 export function buildRelationWorkbook(rows: RelationImportRow[]): string {
   const sheet = XLSX.utils.aoa_to_sheet([
-    ['被评估人姓名', '被评估人职务', '被评估人部门', '评价者姓名', '角色'],
+    ['被评估人姓名', '被评估人职务', '被评估人部门', '项目', '评价者姓名', '角色'],
     ...rows.map((r) => [
       r.evaluatee.name,
       r.jobTitle ?? '',
       r.department ?? '',
+      r.workProject ?? '',
       r.evaluator.name,
       r.role,
     ]),

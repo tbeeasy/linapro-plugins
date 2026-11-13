@@ -2,11 +2,11 @@
 //
 // 导入语义（见 design.md / spec）：
 //   - 仅全量模式、仅发布前允许；发布后拒绝，追加走关系编辑器弹窗。
-//   - 模板列：被评估人姓名 / 被评估人职务 / 被评估人部门 / 评价者姓名 / 角色（不录入工号）。
-//   - 按表头识别列：被评估人姓名、评价者姓名、角色为必需列；职务/部门可选；其余列（如导出文件中的
+//   - 模板列：被评估人姓名 / 被评估人职务 / 被评估人部门 / 项目 / 评价者姓名 / 角色（不录入工号）。
+//   - 按表头识别列：被评估人姓名、评价者姓名、角色为必需列；职务/部门/项目可选；其余列（如导出文件中的
 //     两个工号列）忽略，故导出的 Excel 修改后可直接再导入。
 //   - 行级校验：姓名按 relation_resolve.go 规则解析为唯一在职员工（找不到或在职重名判行失败并点名）、
-//     角色名非空、被评估人≠评价者；职务/部门可选，超长或同一被评估人多行取值冲突判行失败。
+//     角色名非空、被评估人≠评价者；职务/部门/项目可选，超长或同一被评估人多行取值冲突判行失败。
 //   - 任一行校验失败 → 中止整批、回报行号与原因、不写入任何数据。
 //   - 全部通过后单事务 upsert 角色（归一化名称，默认权重 0）→ 被评估人 → 评价关系。
 package relation
@@ -37,32 +37,37 @@ const (
 	headerEvaluateeNo         = "被评估人工号" // 仅导出
 	headerEvaluateeJobTitle   = "被评估人职务" // 可选
 	headerEvaluateeDepartment = "被评估人部门" // 可选
+	headerEvaluateeProject    = "项目"     // 可选：被评估人所在业务项目（与测评项目无关）
 	headerEvaluatorName       = "评价者姓名"
 	headerEvaluatorNo         = "评价者工号" // 仅导出
 	headerRole                = "角色"
 	importHeaderRow           = 1
 )
 
-// 被评估人职务/部门的长度上限（字符数），与 evaluatee 表 VARCHAR 宽度一致。
+// 被评估人职务/部门/项目的长度上限（字符数），与 evaluatee 表 VARCHAR 宽度一致。
 const (
-	maxJobTitleLen   = 100
-	maxDepartmentLen = 200
+	maxJobTitleLen    = 100
+	maxDepartmentLen  = 200
+	maxWorkProjectLen = 200
 )
 
 // importHeaders 返回导入模板的表头（不含工号）。
 func importHeaders() []string {
-	return []string{headerEvaluateeName, headerEvaluateeJobTitle, headerEvaluateeDepartment, headerEvaluatorName, headerRole}
+	return []string{
+		headerEvaluateeName, headerEvaluateeJobTitle, headerEvaluateeDepartment, headerEvaluateeProject,
+		headerEvaluatorName, headerRole,
+	}
 }
 
 // exportHeaders 返回导出表头：在导入模板基础上保留两个工号列便于核对；再导入时工号列被忽略。
 func exportHeaders() []string {
 	return []string{
 		headerEvaluateeName, headerEvaluateeNo, headerEvaluateeJobTitle, headerEvaluateeDepartment,
-		headerEvaluatorName, headerEvaluatorNo, headerRole,
+		headerEvaluateeProject, headerEvaluatorName, headerEvaluatorNo, headerRole,
 	}
 }
 
-// requiredImportHeaders 是导入文件必须包含的列（职务/部门可选）。
+// requiredImportHeaders 是导入文件必须包含的列（职务/部门/项目可选）。
 func requiredImportHeaders() []string {
 	return []string{headerEvaluateeName, headerEvaluatorName, headerRole}
 }
@@ -73,56 +78,70 @@ type importRow struct {
 	evaluateeName string
 	jobTitle      string
 	department    string
+	workProject   string
 	evaluatorName string
 	roleName      string
 }
 
-// evaluateeProfile 是被评估人的问卷级录入属性（职务/部门），空串表示未填写。
+// evaluateeProfile 是被评估人的问卷级录入属性（职务/部门/项目），空串表示未填写。
 type evaluateeProfile struct {
-	JobTitle   string
-	Department string
+	JobTitle    string
+	Department  string
+	WorkProject string // 被评估人所在业务项目（与测评项目无关）
 }
 
-// mergeEvaluateeProfile 把同一被评估人新一行的职务/部门并入已收集的属性：
+// mergeEvaluateeProfile 把同一被评估人新一行的职务/部门/项目并入已收集的属性：
 // 空值不覆盖已有值；已有非空值与新非空值不同视为冲突，返回失败原因（此时 merged 原样返回 prev）。
-// 入参 jobTitle/department 须已归一化。
-func mergeEvaluateeProfile(prev evaluateeProfile, jobTitle, department string) (merged evaluateeProfile, reason string) {
-	if jobTitle != "" && prev.JobTitle != "" && jobTitle != prev.JobTitle {
-		return prev, fmt.Sprintf("被评估人职务「%s」与该被评估人此前填写的「%s」不一致", jobTitle, prev.JobTitle)
+// 入参 next 的各字段须已归一化。
+func mergeEvaluateeProfile(prev, next evaluateeProfile) (merged evaluateeProfile, reason string) {
+	if next.JobTitle != "" && prev.JobTitle != "" && next.JobTitle != prev.JobTitle {
+		return prev, fmt.Sprintf("被评估人职务「%s」与该被评估人此前填写的「%s」不一致", next.JobTitle, prev.JobTitle)
 	}
-	if department != "" && prev.Department != "" && department != prev.Department {
-		return prev, fmt.Sprintf("被评估人部门「%s」与该被评估人此前填写的「%s」不一致", department, prev.Department)
+	if next.Department != "" && prev.Department != "" && next.Department != prev.Department {
+		return prev, fmt.Sprintf("被评估人部门「%s」与该被评估人此前填写的「%s」不一致", next.Department, prev.Department)
+	}
+	if next.WorkProject != "" && prev.WorkProject != "" && next.WorkProject != prev.WorkProject {
+		return prev, fmt.Sprintf("项目「%s」与该被评估人此前填写的「%s」不一致", next.WorkProject, prev.WorkProject)
 	}
 	merged = prev
 	if merged.JobTitle == "" {
-		merged.JobTitle = jobTitle
+		merged.JobTitle = next.JobTitle
 	}
 	if merged.Department == "" {
-		merged.Department = department
+		merged.Department = next.Department
+	}
+	if merged.WorkProject == "" {
+		merged.WorkProject = next.WorkProject
 	}
 	return merged, ""
 }
 
-// evaluateeProfileLengthReason 校验职务/部门长度，超出表字段宽度时返回失败原因，合法返回空串。
-func evaluateeProfileLengthReason(jobTitle, department string) string {
-	if utf8.RuneCountInString(jobTitle) > maxJobTitleLen {
+// evaluateeProfileLengthReason 校验职务/部门/项目长度，超出表字段宽度时返回失败原因，合法返回空串。
+func evaluateeProfileLengthReason(p evaluateeProfile) string {
+	if utf8.RuneCountInString(p.JobTitle) > maxJobTitleLen {
 		return fmt.Sprintf("被评估人职务不能超过 %d 个字", maxJobTitleLen)
 	}
-	if utf8.RuneCountInString(department) > maxDepartmentLen {
+	if utf8.RuneCountInString(p.Department) > maxDepartmentLen {
 		return fmt.Sprintf("被评估人部门不能超过 %d 个字", maxDepartmentLen)
+	}
+	if utf8.RuneCountInString(p.WorkProject) > maxWorkProjectLen {
+		return fmt.Sprintf("项目不能超过 %d 个字", maxWorkProjectLen)
 	}
 	return ""
 }
 
-// resolveRowProfile 归一化一行导入的职务/部门，校验长度后并入该被评估人已收集的属性；
+// resolveRowProfile 归一化一行导入的职务/部门/项目，校验长度后并入该被评估人已收集的属性；
 // 失败时返回原因（此时 merged 为 prev，调用方应判该行失败）。
-func resolveRowProfile(prev evaluateeProfile, rawJobTitle, rawDepartment string) (merged evaluateeProfile, reason string) {
-	jobTitle := textutil.NormalizeName(rawJobTitle)
-	department := textutil.NormalizeName(rawDepartment)
-	if reason = evaluateeProfileLengthReason(jobTitle, department); reason != "" {
+func resolveRowProfile(prev, raw evaluateeProfile) (merged evaluateeProfile, reason string) {
+	next := evaluateeProfile{
+		JobTitle:    textutil.NormalizeName(raw.JobTitle),
+		Department:  textutil.NormalizeName(raw.Department),
+		WorkProject: textutil.NormalizeName(raw.WorkProject),
+	}
+	if reason = evaluateeProfileLengthReason(next); reason != "" {
 		return prev, reason
 	}
-	return mergeEvaluateeProfile(prev, jobTitle, department)
+	return mergeEvaluateeProfile(prev, next)
 }
 
 // GenerateImportTemplate 生成评价关系 Excel 全量导入模板。
@@ -137,7 +156,7 @@ func (s *serviceImpl) GenerateImportTemplate(ctx context.Context) (data []byte, 
 		}
 	}
 	// 示例行（顺序与 importHeaders 一致）。
-	sample := []string{"张三", "销售总监", "华东销售部", "李四", "上级"}
+	sample := []string{"张三", "销售总监", "华东销售部", "星火项目", "李四", "上级"}
 	for i, v := range sample {
 		if err = excelutil.SetCellValue(f, sheet, i+1, importHeaderRow+1, v); err != nil {
 			return nil, err
@@ -187,7 +206,7 @@ func (s *serviceImpl) ImportRelations(ctx context.Context, in ImportInput) (*Imp
 		roleName    string
 	}
 	resolvedRows := make([]resolved, 0, len(rows))
-	// 被评估人 EmpID → 合并后的职务/部门（同一被评估人多行取首个非空值）。
+	// 被评估人 EmpID → 合并后的职务/部门/项目（同一被评估人多行取首个非空值）。
 	profiles := make(map[int64]evaluateeProfile)
 
 	// 一次性批量解析全部姓名（无 N+1）：问卷为平台级，按姓名跨租户解析。
@@ -238,8 +257,10 @@ func (s *serviceImpl) ImportRelations(ctx context.Context, in ImportInput) (*Imp
 			fail(r.rowNum, "被评估人与评价者不能为同一员工")
 			continue
 		}
-		// 职务/部门：可选；超长或与同一被评估人此前行的非空值冲突判行失败。
-		merged, reason := resolveRowProfile(profiles[eeEmp.EmpID], r.jobTitle, r.department)
+		// 职务/部门/项目：可选；超长或与同一被评估人此前行的非空值冲突判行失败。
+		merged, reason := resolveRowProfile(profiles[eeEmp.EmpID], evaluateeProfile{
+			JobTitle: r.jobTitle, Department: r.department, WorkProject: r.workProject,
+		})
 		if reason != "" {
 			fail(r.rowNum, reason)
 			continue
@@ -351,6 +372,10 @@ func (s *serviceImpl) upsertEvaluatee(ctx context.Context, projectID, questionna
 			data.Department = profile.Department
 			changed = true
 		}
+		if profile.WorkProject != "" && profile.WorkProject != existing.WorkProject {
+			data.WorkProject = profile.WorkProject
+			changed = true
+		}
 		if changed {
 			if _, err = dao.Evaluatee.Ctx(ctx).
 				Where(dao.Evaluatee.Columns().Id, existing.Id).Data(data).Update(); err != nil {
@@ -365,6 +390,7 @@ func (s *serviceImpl) upsertEvaluatee(ctx context.Context, projectID, questionna
 		EvaluateeEmpId:  empID,
 		JobTitle:        profile.JobTitle,
 		Department:      profile.Department,
+		WorkProject:     profile.WorkProject,
 	}).InsertAndGetId()
 	if err != nil {
 		return 0, err
@@ -404,6 +430,7 @@ func parseImportRows(ctx context.Context, reader io.Reader) (out []importRow, er
 			evaluateeName: cellAt(row, cols[headerEvaluateeName]),
 			jobTitle:      cellAt(row, cols[headerEvaluateeJobTitle]),
 			department:    cellAt(row, cols[headerEvaluateeDepartment]),
+			workProject:   cellAt(row, cols[headerEvaluateeProject]),
 			evaluatorName: cellAt(row, cols[headerEvaluatorName]),
 			roleName:      cellAt(row, cols[headerRole]),
 		})
@@ -495,13 +522,14 @@ func (s *serviceImpl) ExportRelations(ctx context.Context, questionnaireID int64
 	// 被评估人工号映射：被评估人表存 evaluatee_emp_id，评价关系存 evaluator_emp_id；
 	// r.EvaluateeId 是 evaluatee.id，需先取 evaluatee_emp_id 再查工号。
 	eeEmpIDMap := make(map[int64]int64)              // evaluatee.id -> evaluatee_emp_id
-	eeProfileMap := make(map[int64]evaluateeProfile) // evaluatee.id -> 职务/部门
+	eeProfileMap := make(map[int64]evaluateeProfile) // evaluatee.id -> 职务/部门/项目
 	if len(evalEmpIDs) > 0 {
 		var ees []struct {
 			Id             int64  `orm:"id"`
 			EvaluateeEmpId int64  `orm:"evaluatee_emp_id"`
 			JobTitle       string `orm:"job_title"`
 			Department     string `orm:"department"`
+			WorkProject    string `orm:"work_project"`
 		}
 		if err = dao.Evaluatee.Ctx(ctx).
 			Fields(
@@ -509,13 +537,14 @@ func (s *serviceImpl) ExportRelations(ctx context.Context, questionnaireID int64
 				dao.Evaluatee.Columns().EvaluateeEmpId,
 				dao.Evaluatee.Columns().JobTitle,
 				dao.Evaluatee.Columns().Department,
+				dao.Evaluatee.Columns().WorkProject,
 			).
 			WhereIn(dao.Evaluatee.Columns().Id, keysOfMap(evalEmpIDs)).Scan(&ees); err != nil {
 			return nil, err
 		}
 		for _, e := range ees {
 			eeEmpIDMap[e.Id] = e.EvaluateeEmpId
-			eeProfileMap[e.Id] = evaluateeProfile{JobTitle: e.JobTitle, Department: e.Department}
+			eeProfileMap[e.Id] = evaluateeProfile{JobTitle: e.JobTitle, Department: e.Department, WorkProject: e.WorkProject}
 		}
 	}
 
@@ -563,6 +592,7 @@ func (s *serviceImpl) ExportRelations(ctx context.Context, questionnaireID int64
 			empNoMap[eeEmpID],
 			profile.JobTitle,
 			profile.Department,
+			profile.WorkProject,
 			empNameMap[r.EvaluatorEmpId],
 			empNoMap[r.EvaluatorEmpId],
 			roleNames[r.RoleId],

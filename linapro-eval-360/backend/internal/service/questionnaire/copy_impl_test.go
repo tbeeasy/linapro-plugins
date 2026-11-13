@@ -145,3 +145,70 @@ func TestCopyQuestionnaireKeepsMatrixColumnComment(t *testing.T) {
 		t.Errorf("「良好」应保持不允许评语：%+v", *plain)
 	}
 }
+
+// 复制问卷：被评估人的职务/部门/项目须原样带到新问卷（FB-2）。
+func TestCopyQuestionnaireKeepsEvaluateeProfile(t *testing.T) {
+	ctx := testkit.Setup(t)
+
+	projectID, err := dao.Project.Ctx(ctx).Data(do.Project{
+		Name: "FB2 复制被评估人 " + t.Name(), Description: "集成测试",
+	}).InsertAndGetId()
+	if err != nil {
+		t.Fatalf("建项目失败：%v", err)
+	}
+	t.Cleanup(func() {
+		if _, dErr := dao.Project.Ctx(ctx).Where(dao.Project.Columns().Id, projectID).Delete(); dErr != nil {
+			t.Errorf("清理项目失败：%v", dErr)
+		}
+	})
+	srcID, err := dao.Questionnaire.Ctx(ctx).Data(do.Questionnaire{
+		ProjectId: projectID, Title: "FB2 源问卷",
+	}).InsertAndGetId()
+	if err != nil {
+		t.Fatalf("建源问卷失败：%v", err)
+	}
+	// 被评估人不经 empcap 解析，直接以任意 EmpID 落库；清理在问卷之前执行（t.Cleanup 后注册先执行）。
+	t.Cleanup(func() { cleanupQuestionnaire(t, ctx, srcID) })
+	t.Cleanup(func() { cleanupEvaluatees(t, ctx, srcID) })
+	if _, err = dao.Evaluatee.Ctx(ctx).Data(do.Evaluatee{
+		ProjectId: projectID, QuestionnaireId: srcID, EvaluateeEmpId: 9_000_001,
+		JobTitle: "销售总监", Department: "华东销售部", WorkProject: "星火项目",
+	}).Insert(); err != nil {
+		t.Fatalf("建被评估人失败：%v", err)
+	}
+
+	newID, err := New().CopyQuestionnaire(ctx, srcID, "FB2 复制问卷")
+	if err != nil {
+		t.Fatalf("复制问卷失败：%v", err)
+	}
+	t.Cleanup(func() { cleanupQuestionnaire(t, ctx, newID) })
+	t.Cleanup(func() { cleanupEvaluatees(t, ctx, newID) })
+
+	var copied []*entitymodel.Evaluatee
+	if err = dao.Evaluatee.Ctx(ctx).
+		Where(dao.Evaluatee.Columns().QuestionnaireId, newID).Scan(&copied); err != nil {
+		t.Fatalf("读取复制后的被评估人失败：%v", err)
+	}
+	if len(copied) != 1 {
+		t.Fatalf("被评估人数：got %d want 1", len(copied))
+	}
+	got := copied[0]
+	if got.EvaluateeEmpId != 9_000_001 || got.JobTitle != "销售总监" ||
+		got.Department != "华东销售部" || got.WorkProject != "星火项目" {
+		t.Errorf("被评估人职务/部门/项目未完整复制：%+v", *got)
+	}
+}
+
+// cleanupEvaluatees 清理一份问卷下的评价关系与被评估人。
+func cleanupEvaluatees(t *testing.T, ctx context.Context, questionnaireID int64) {
+	t.Helper()
+
+	if _, dErr := dao.Relation.Ctx(ctx).
+		Where(dao.Relation.Columns().QuestionnaireId, questionnaireID).Delete(); dErr != nil {
+		t.Errorf("清理评价关系失败：%v", dErr)
+	}
+	if _, dErr := dao.Evaluatee.Ctx(ctx).
+		Where(dao.Evaluatee.Columns().QuestionnaireId, questionnaireID).Delete(); dErr != nil {
+		t.Errorf("清理被评估人失败：%v", dErr)
+	}
+}

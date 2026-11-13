@@ -29,6 +29,7 @@ type EvaluateeColumns struct {
 	UpdatedAt       string //
 	JobTitle        string // 被评估人职务（导入/新增弹窗录入，可空）
 	Department      string // 被评估人部门（导入/新增弹窗录入，可空）
+	WorkProject     string // 被评估人所在项目（导入/新增弹窗录入，可空；与测评项目 project_id 无关）
 }
 
 // evaluateeColumns holds the columns for the table plugin_linapro_eval_360_evaluatee.
@@ -41,6 +42,7 @@ var evaluateeColumns = EvaluateeColumns{
 	UpdatedAt:       "updated_at",
 	JobTitle:        "job_title",
 	Department:      "department",
+	WorkProject:     "work_project",
 }
 
 // NewEvaluateeDao creates and returns a new DAO object for table data access.

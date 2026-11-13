@@ -143,11 +143,12 @@ func (c *ControllerV1) AddRelation(ctx context.Context, req *v1.AddRelationReq) 
 			continue
 		}
 		items = append(items, rsvc.AddRelationItem{
-			EvaluateeName:       it.EvaluateeName,
-			EvaluateeJobTitle:   it.EvaluateeJobTitle,
-			EvaluateeDepartment: it.EvaluateeDepartment,
-			EvaluatorName:       it.EvaluatorName,
-			RoleName:            it.RoleName,
+			EvaluateeName:        it.EvaluateeName,
+			EvaluateeJobTitle:    it.EvaluateeJobTitle,
+			EvaluateeDepartment:  it.EvaluateeDepartment,
+			EvaluateeWorkProject: it.EvaluateeWorkProject,
+			EvaluatorName:        it.EvaluatorName,
+			RoleName:             it.RoleName,
 		})
 	}
 	ids, err := c.relationSvc.AddRelations(ctx, rsvc.AddRelationsInput{
@@ -192,13 +193,14 @@ func toRelationMatrixDTO(m *rsvc.RelationMatrix) *v1.RelationMatrix {
 	out := &v1.RelationMatrix{QuestionnaireID: m.QuestionnaireID, Roles: toRoleItemDTOs(m.Roles)}
 	for _, e := range m.Evaluatees {
 		row := &v1.EvaluateeRow{
-			EvaluateeID:         e.EvaluateeID,
-			EvaluateeEmpID:      e.EvaluateeEmpID,
-			EvaluateeName:       e.EvaluateeName,
-			EvaluateeNo:         e.EvaluateeNo,
-			EvaluateeJobTitle:   e.EvaluateeJobTitle,
-			EvaluateeDepartment: e.EvaluateeDepartment,
-			Groups:              make([]*v1.RoleGroup, 0, len(e.Groups)),
+			EvaluateeID:          e.EvaluateeID,
+			EvaluateeEmpID:       e.EvaluateeEmpID,
+			EvaluateeName:        e.EvaluateeName,
+			EvaluateeNo:          e.EvaluateeNo,
+			EvaluateeJobTitle:    e.EvaluateeJobTitle,
+			EvaluateeDepartment:  e.EvaluateeDepartment,
+			EvaluateeWorkProject: e.EvaluateeWorkProject,
+			Groups:               make([]*v1.RoleGroup, 0, len(e.Groups)),
 		}
 		for _, g := range e.Groups {
 			rg := &v1.RoleGroup{RoleID: g.RoleID, RoleName: g.RoleName, Items: make([]*v1.RelationItem, 0, len(g.Items))}

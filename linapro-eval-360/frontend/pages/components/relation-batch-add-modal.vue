@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 新增评价关系弹窗：按「组」录入，一组 = 一个被评估人 + 其多名评价人。
-// 每组五栏并排（均为 TextArea）：被评估人姓名/职务/部门每组只填一行（提交时校验，
-// 职务/部门可选），评价人姓名/角色为多行文本，按行号一一对应、一行一个评价人，方便批量粘贴。
+// 每组六栏并排（均为 TextArea）：被评估人姓名/职务/部门/项目每组只填一行（提交时校验，
+// 职务/部门/项目可选），评价人姓名/角色为多行文本，按行号一一对应、一行一个评价人，方便批量粘贴。
 // 不录入工号：后端按在职员工姓名匹配，任一姓名在职重名或找不到时整批拒绝（不写入任何数据）
 // 并点名问题姓名，故全部组收集完后**一次**提交。
 // 「添加」新增一整组。角色为自由文本，后端按名称 upsert，不依赖预先配置的角色。
@@ -22,9 +22,10 @@ const emit = defineEmits<{ reload: [] }>();
 interface Group {
   key: number;
   evaluateeName: string;
-  // 被评估人职务/部门：可选，每组至多一行。
+  // 被评估人职务/部门/项目：可选，每组至多一行。
   evaluateeJobTitle: string;
   evaluateeDepartment: string;
+  evaluateeWorkProject: string;
   // 右侧两栏多行文本，按行号一一对应。
   evaluatorNames: string;
   roleNames: string;
@@ -43,6 +44,7 @@ function makeGroup(): Group {
     evaluateeName: '',
     evaluateeJobTitle: '',
     evaluateeDepartment: '',
+    evaluateeWorkProject: '',
     evaluatorNames: '',
     roleNames: '',
   };
@@ -76,10 +78,11 @@ const [BasicModal, modalApi] = useVbenModal({
     if (!open) return;
     const data = modalApi.getData<{
       questionnaireId: number;
-      // 从「被评估人所在行」打开时预填其姓名/职务/部门，省去手动重复输入。
+      // 从「被评估人所在行」打开时预填其姓名/职务/部门/项目，省去手动重复输入。
       evaluateeName?: string;
       evaluateeJobTitle?: string;
       evaluateeDepartment?: string;
+      evaluateeWorkProject?: string;
     }>();
     questionnaireId.value = data?.questionnaireId ?? 0;
     keySeq = 0;
@@ -89,6 +92,9 @@ const [BasicModal, modalApi] = useVbenModal({
     if (data?.evaluateeDepartment) {
       first.evaluateeDepartment = data.evaluateeDepartment;
     }
+    if (data?.evaluateeWorkProject) {
+      first.evaluateeWorkProject = data.evaluateeWorkProject;
+    }
     groups.value = [first];
   },
   async onConfirm() {
@@ -96,10 +102,11 @@ const [BasicModal, modalApi] = useVbenModal({
 
     for (let gi = 0; gi < groups.value.length; gi++) {
       const g = groups.value[gi]!;
-      // 被评估人三栏与评价人同为多行文本，但每组只应填一行，取非空行校验。
+      // 被评估人四栏与评价人同为多行文本，但每组只应填一行，取非空行校验。
       const eeNames = nonEmptyLines(g.evaluateeName);
       const eeJobTitles = nonEmptyLines(g.evaluateeJobTitle);
       const eeDepartments = nonEmptyLines(g.evaluateeDepartment);
+      const eeWorkProjects = nonEmptyLines(g.evaluateeWorkProject);
       const er = g.evaluatorNames.split('\n');
       const rn = g.roleNames.split('\n');
       const lineCount = Math.max(er.length, rn.length);
@@ -119,6 +126,7 @@ const [BasicModal, modalApi] = useVbenModal({
         eeNames.length === 0 &&
         eeJobTitles.length === 0 &&
         eeDepartments.length === 0 &&
+        eeWorkProjects.length === 0 &&
         lines.length === 0
       ) {
         continue;
@@ -136,7 +144,8 @@ const [BasicModal, modalApi] = useVbenModal({
       if (
         eeNames.length > 1 ||
         eeJobTitles.length > 1 ||
-        eeDepartments.length > 1
+        eeDepartments.length > 1 ||
+        eeWorkProjects.length > 1
       ) {
         message.warning(
           $t('plugin.linapro-eval-360.page.relation.batchEvaluateeSingleLine', {
@@ -146,9 +155,10 @@ const [BasicModal, modalApi] = useVbenModal({
         return;
       }
       const name = eeNames[0]!;
-      // 职务/部门可选：留空时后端保留已有被评估人的原值。
+      // 职务/部门/项目可选：留空时后端保留已有被评估人的原值。
       const jobTitle = eeJobTitles[0] ?? '';
       const department = eeDepartments[0] ?? '';
+      const workProject = eeWorkProjects[0] ?? '';
 
       if (lines.length === 0) {
         message.warning(
@@ -173,6 +183,7 @@ const [BasicModal, modalApi] = useVbenModal({
           evaluateeName: name,
           evaluateeJobTitle: jobTitle,
           evaluateeDepartment: department,
+          evaluateeWorkProject: workProject,
           evaluatorName: ln.name,
           roleName: ln.role,
         });
@@ -212,8 +223,8 @@ const [BasicModal, modalApi] = useVbenModal({
         {{ $t('plugin.linapro-eval-360.page.relation.batchGridHint') }}
       </div>
 
-      <!-- 每组一块：五栏并排，均为 TextArea。左三栏=被评估人姓名/职务/部门（每组只填一行，
-           提交时校验；职务/部门可选），右两栏=评价人姓名/角色（多行文本，按行号一一对应）。 -->
+      <!-- 每组一块：六栏并排，均为 TextArea。左四栏=被评估人姓名/职务/部门/项目（每组只填一行，
+           提交时校验；职务/部门/项目可选），右两栏=评价人姓名/角色（多行文本，按行号一一对应）。 -->
       <div
         v-for="g in groups"
         :key="g.key"
@@ -237,6 +248,10 @@ const [BasicModal, modalApi] = useVbenModal({
             <i class="eval360-split-count">{{ lineCount(g.evaluateeDepartment) }}</i>
           </span>
           <span>
+            {{ $t('plugin.linapro-eval-360.page.relation.evaluateeWorkProject') }}
+            <i class="eval360-split-count">{{ lineCount(g.evaluateeWorkProject) }}</i>
+          </span>
+          <span>
             {{ $t('plugin.linapro-eval-360.page.relation.evaluatorName') }}
             <i class="eval360-split-count">{{ lineCount(g.evaluatorNames) }}</i>
           </span>
@@ -256,7 +271,7 @@ const [BasicModal, modalApi] = useVbenModal({
               :placeholder="$t('plugin.linapro-eval-360.page.relation.evaluateeName')"
             />
           </div>
-          <!-- 被评估人职务/部门：可选，每组至多一行。 -->
+          <!-- 被评估人职务/部门/项目：可选，每组至多一行。 -->
           <div class="eval360-split-pane">
             <TextArea
               v-model:value="g.evaluateeJobTitle"
@@ -272,6 +287,15 @@ const [BasicModal, modalApi] = useVbenModal({
               class="eval360-ta"
               :bordered="false"
               data-testid="eval360-batch-evaluatee-department"
+              :placeholder="$t('plugin.linapro-eval-360.page.relation.optionalPlaceholder')"
+            />
+          </div>
+          <div class="eval360-split-pane">
+            <TextArea
+              v-model:value="g.evaluateeWorkProject"
+              class="eval360-ta"
+              :bordered="false"
+              data-testid="eval360-batch-evaluatee-work-project"
               :placeholder="$t('plugin.linapro-eval-360.page.relation.optionalPlaceholder')"
             />
           </div>
@@ -316,7 +340,7 @@ const [BasicModal, modalApi] = useVbenModal({
   </BasicModal>
 </template>
 
-<!-- 弹窗宽度不用 Tailwind 任意值类（w-[1100px]）：该类只出现在插件里，打包产物的 CSS 若没生成它，
+<!-- 弹窗宽度不用 Tailwind 任意值类（w-[1240px]）：该类只出现在插件里，打包产物的 CSS 若没生成它，
      弹窗会退化为 fixed + inset-x-0 + 宽度 auto，铺满整屏。这里用普通样式兜底。
      弹窗内容被传送到 body，scoped 样式命中不到，所以这一块不加 scoped；
      未分层的样式优先级高于 Tailwind 的 utilities 层，能覆盖框架默认的 w-[520px]。
@@ -324,14 +348,14 @@ const [BasicModal, modalApi] = useVbenModal({
 <style>
 @media (min-width: 768px) {
   .eval360-batch-add-modal {
-    width: 1100px;
+    width: 1240px;
     max-width: 95vw;
   }
 }
 </style>
 
 <style scoped>
-/* 每组外框：五栏并排的一个可纵向拖拽缩放的框，内部各栏铺满、按行号同步。
+/* 每组外框：六栏并排的一个可纵向拖拽缩放的框，内部各栏铺满、按行号同步。
    高度相较旧版缩小（约 140px），因为可以添加多组数据。 */
 .eval360-split-box {
   display: flex;
@@ -345,7 +369,7 @@ const [BasicModal, modalApi] = useVbenModal({
   border-radius: 6px;
 }
 
-/* 表头五栏等比，与下方五栏对齐。 */
+/* 表头六栏等比，与下方六栏对齐。 */
 .eval360-split-head {
   display: flex;
   flex: none;
@@ -366,7 +390,7 @@ const [BasicModal, modalApi] = useVbenModal({
   font-style: normal;
   color: var(--ant-color-primary, #1677ff);
 }
-/* 每组一行：左侧为五栏方框，右侧为删除按钮（位于最后一个 TextArea 的右边）。 */
+/* 每组一行：左侧为六栏方框，右侧为删除按钮（位于最后一个 TextArea 的右边）。 */
 .eval360-group-row {
   display: flex;
   align-items: center;
@@ -376,7 +400,7 @@ const [BasicModal, modalApi] = useVbenModal({
   flex: 1 1 auto;
   min-width: 0;
 }
-/* 删除按钮：与方框顶部对齐，不参与方框内部的五栏等分。 */
+/* 删除按钮：与方框顶部对齐，不参与方框内部的六栏等分。 */
 .eval360-group-remove {
   flex: none;
   padding: 0 8px;
@@ -386,7 +410,7 @@ const [BasicModal, modalApi] = useVbenModal({
   visibility: hidden;
 }
 
-/* 主体：五栏 + 栏间竖线；撑满整块剩余高度。 */
+/* 主体：六栏 + 栏间竖线；撑满整块剩余高度。 */
 .eval360-split-body {
   display: flex;
   flex: 1 1 auto;

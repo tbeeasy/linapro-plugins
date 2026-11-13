@@ -1,8 +1,8 @@
-// editor_impl_test.go 覆盖关系编辑器「按姓名批量新增评价关系」的语义（FB-13 职务/部门、FB-32 按姓名录入）。
+// editor_impl_test.go 覆盖关系编辑器「按姓名批量新增评价关系」的语义（FB-13 职务/部门、FB-32 按姓名录入、FB-2 项目）。
 //
 // 与 spec「关系编辑器」需求一致：
-//  1. 新增评价关系时被评估人不存在 → 以入参职务/部门新建，明细列表回显这两列；
-//  2. 被评估人已存在 → 非空职务/部门覆盖原值，留空保留原值（行内「新增」预填后原样提交即不变）；
+//  1. 新增评价关系时被评估人不存在 → 以入参职务/部门/项目新建，明细列表回显这三列；
+//  2. 被评估人已存在 → 非空职务/部门/项目覆盖原值，留空保留原值（行内「新增」预填后原样提交即不变）；
 //  3. 只录入姓名：任一姓名有两名及以上在职同名员工或找不到 → 整批拒绝、零写入，错误参数点名全部问题姓名。
 //
 // 复用 import_impl_test.go 的 seedProfileFixture / seedHomonym（真实 PostgreSQL + empcap 测试实现）。
@@ -29,11 +29,12 @@ func TestAddRelationsWritesAndUpdatesEvaluateeProfile(t *testing.T) {
 	ids, err := svc.AddRelations(ctx, AddRelationsInput{
 		QuestionnaireID: f.questionnaireID,
 		Items: []AddRelationItem{{
-			EvaluateeName:       " " + ee.Name + " ",
-			EvaluateeJobTitle:   "  销售总监 ",
-			EvaluateeDepartment: "华东销售部",
-			EvaluatorName:       er.Name,
-			RoleName:            "上级",
+			EvaluateeName:        " " + ee.Name + " ",
+			EvaluateeJobTitle:    "  销售总监 ",
+			EvaluateeDepartment:  "华东销售部",
+			EvaluateeWorkProject: " 星火　项目 ",
+			EvaluatorName:        er.Name,
+			RoleName:             "上级",
 		}},
 	})
 	if err != nil {
@@ -43,28 +44,29 @@ func TestAddRelationsWritesAndUpdatesEvaluateeProfile(t *testing.T) {
 		t.Fatalf("期望返回 1 个新评价关系 id，实际 %v", ids)
 	}
 	if got := evaluateeProfileOf(t, ctx, f.questionnaireID, ee.EmpID); got == nil ||
-		*got != (evaluateeProfile{JobTitle: "销售总监", Department: "华东销售部"}) {
-		t.Fatalf("新建被评估人职务/部门期望 销售总监/华东销售部，实际 %+v", got)
+		*got != (evaluateeProfile{JobTitle: "销售总监", Department: "华东销售部", WorkProject: "星火 项目"}) {
+		t.Fatalf("新建被评估人职务/部门/项目期望 销售总监/华东销售部/星火 项目，实际 %+v", got)
 	}
 
-	// 2. 已存在 + 职务留空、部门改值：职务保留，部门覆盖。
+	// 2. 已存在 + 职务留空、部门与项目改值：职务保留，部门、项目覆盖。
 	if _, err = svc.AddRelations(ctx, AddRelationsInput{
 		QuestionnaireID: f.questionnaireID,
 		Items: []AddRelationItem{{
-			EvaluateeName:       ee.Name,
-			EvaluateeDepartment: "华南销售部",
-			EvaluatorName:       peer.Name,
-			RoleName:            "平级",
+			EvaluateeName:        ee.Name,
+			EvaluateeDepartment:  "华南销售部",
+			EvaluateeWorkProject: "燎原项目",
+			EvaluatorName:        peer.Name,
+			RoleName:             "平级",
 		}},
 	}); err != nil {
 		t.Fatalf("追加新增失败：%v", err)
 	}
-	want := evaluateeProfile{JobTitle: "销售总监", Department: "华南销售部"}
+	want := evaluateeProfile{JobTitle: "销售总监", Department: "华南销售部", WorkProject: "燎原项目"}
 	if got := evaluateeProfileOf(t, ctx, f.questionnaireID, ee.EmpID); got == nil || *got != want {
-		t.Fatalf("已存在被评估人职务/部门期望 %+v，实际 %+v", want, got)
+		t.Fatalf("已存在被评估人职务/部门/项目期望 %+v，实际 %+v", want, got)
 	}
 
-	// 3. 明细列表回显职务/部门。
+	// 3. 明细列表回显职务/部门/项目。
 	matrix, err := svc.ListRelations(ctx, f.questionnaireID)
 	if err != nil {
 		t.Fatalf("读取明细失败：%v", err)
@@ -75,6 +77,7 @@ func TestAddRelationsWritesAndUpdatesEvaluateeProfile(t *testing.T) {
 	row := matrix.Evaluatees[0]
 	testkit.Equal(t, "列表职务", row.EvaluateeJobTitle, want.JobTitle)
 	testkit.Equal(t, "列表部门", row.EvaluateeDepartment, want.Department)
+	testkit.Equal(t, "列表项目", row.EvaluateeWorkProject, want.WorkProject)
 }
 
 // TestAddRelationsBatchSharesEvaluateeAndRole 一次提交多条：同一被评估人与同一角色只建一份，返回 id 与条目一一对应。

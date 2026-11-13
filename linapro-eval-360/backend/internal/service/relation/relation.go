@@ -48,13 +48,13 @@ type Service interface {
 	DeleteRole(ctx context.Context, roleID int64, cascade bool) error
 
 	// GenerateImportTemplate 生成评价关系 Excel 全量导入模板（列：被评估人姓名/被评估人职务/被评估人部门/
-	// 评价者姓名/角色；不含工号，职务、部门可选）。
+	// 项目/评价者姓名/角色；不含工号，职务、部门、项目可选）。
 	GenerateImportTemplate(ctx context.Context) ([]byte, error)
 	// ImportRelations 全量导入评价关系：按表头识别列（工号等未识别列忽略），姓名按在职员工解析，
 	// 找不到或在职重名判该行失败并点名；先校验全部行，任一行失败即中止整批不写入；
 	// 全部通过后在单事务内 upsert 角色、被评估人、评价关系（已发布的问卷拒绝导入）。
 	// 缺少必需列返回 CodeImportHeaderMissing。
-	// 同一被评估人多行的职务/部门取首个非空值；出现不同的非空值视为冲突，判该行失败。
+	// 同一被评估人多行的职务/部门/项目取首个非空值；出现不同的非空值视为冲突，判该行失败。
 	// 返回成功条数与失败清单（行号+原因）。
 	ImportRelations(ctx context.Context, in ImportInput) (*ImportResult, error)
 	// ExportRelations 导出当前问卷的评价关系 Excel（导入模板各列 + 被评估人/评价者工号，便于核对；
@@ -70,7 +70,7 @@ type Service interface {
 	// （CodeEmployeeNameNotFound）即整体拒绝、零写入，错误参数 names 列出全部问题姓名；
 	// 条目为空返回 CodeRelationItemsEmpty，姓名/角色为空返回 CodeEmployeeNameEmpty/CodeRoleNameEmpty，
 	// 自评返回 CodeImportSelfEvaluate。全部通过后单事务写入并按条目顺序返回新评价关系 id。
-	// 被评估人不存在时按条目职务/部门新建；已存在时非空职务/部门覆盖原值、空值保留原值。
+	// 被评估人不存在时按条目职务/部门/项目新建；已存在时非空值覆盖原值、空值保留原值。
 	AddRelations(ctx context.Context, in AddRelationsInput) ([]int64, error)
 	// UpdateRelationRole 修改一条评价关系的角色（改派）。
 	UpdateRelationRole(ctx context.Context, relationID, roleID int64) error
@@ -142,9 +142,11 @@ type EvaluateeRow struct {
 	EvaluateeName  string `json:"evaluateeName"`
 	EvaluateeNo    string `json:"evaluateeNo"`
 	// EvaluateeJobTitle / EvaluateeDepartment 为被评估人职务/部门（问卷级录入文本，可空）。
-	EvaluateeJobTitle   string       `json:"evaluateeJobTitle"`
-	EvaluateeDepartment string       `json:"evaluateeDepartment"`
-	Groups              []*RoleGroup `json:"groups"`
+	EvaluateeJobTitle   string `json:"evaluateeJobTitle"`
+	EvaluateeDepartment string `json:"evaluateeDepartment"`
+	// EvaluateeWorkProject 为被评估人所在项目（问卷级录入文本，可空；与测评项目无关）。
+	EvaluateeWorkProject string       `json:"evaluateeWorkProject"`
+	Groups               []*RoleGroup `json:"groups"`
 }
 
 // RoleGroup 是某角色下的评价者列表（区分已评/未评）。
@@ -191,8 +193,10 @@ type AddRelationItem struct {
 	// EvaluateeJobTitle / EvaluateeDepartment 为被评估人职务/部门（可空；空值不覆盖已有被评估人的原值）。
 	EvaluateeJobTitle   string
 	EvaluateeDepartment string
-	EvaluatorName       string // 评价者姓名（须唯一对应一名在职员工）
-	RoleName            string // 角色名（归一化后查已有，没有才建）
+	// EvaluateeWorkProject 为被评估人所在项目（可空；空值不覆盖已有被评估人的原值）。
+	EvaluateeWorkProject string
+	EvaluatorName        string // 评价者姓名（须唯一对应一名在职员工）
+	RoleName             string // 角色名（归一化后查已有，没有才建）
 }
 
 // weightZero 是默认角色权重（导入生成时）。

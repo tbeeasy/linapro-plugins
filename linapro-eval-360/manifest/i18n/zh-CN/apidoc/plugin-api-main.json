@@ -15,6 +15,9 @@
                 "evaluateeDepartment": {
                   "dc": "被评估人部门（可选，最多 200 字）；为空时已有被评估人保留原值"
                 },
+                "evaluateeWorkProject": {
+                  "dc": "被评估人所在项目（可选，最多 200 字，与测评项目无关）；为空时已有被评估人保留原值"
+                },
                 "evaluatorName": {
                   "dc": "评价者姓名，须唯一对应一名在职员工"
                 },
@@ -34,6 +37,13 @@
               "fields": {
                 "ids": {
                   "dc": "新评价关系 id，顺序与请求 items 一致"
+                }
+              }
+            },
+            "EvaluateeRow": {
+              "fields": {
+                "evaluateeWorkProject": {
+                  "dc": "被评估人所在项目（问卷级录入文本，与测评项目无关；未填写为空串）"
                 }
               }
             },

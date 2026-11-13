@@ -278,12 +278,12 @@ export class Eval360Page {
 
   // 被评估人行的「新增」：弹窗已预填被评估人，只补录一名评价人姓名及其角色（角色按名称 upsert；
   // 不录入工号，后端按在职员工姓名匹配）。
-  // 传入 expectPrefill 时先断言弹窗预填了该被评估人的职务/部门（FB-13）。
+  // 传入 expectPrefill 时先断言弹窗预填了该被评估人的职务/部门/项目（FB-13、FB-2）。
   async addRelationForEvaluatee(
     evaluateeName: string,
     evaluator: { employeeNo: string; name: string },
     roleName: string,
-    expectPrefill?: { jobTitle: string; department: string },
+    expectPrefill?: { jobTitle: string; department: string; workProject: string },
   ) {
     await this.evaluateeRow(evaluateeName).getByTestId('eval360-evaluatee-add-btn').click();
     const dialog = this.relationDialog();
@@ -293,6 +293,9 @@ export class Eval360Page {
       );
       await expect(dialog.getByTestId('eval360-batch-evaluatee-department')).toHaveValue(
         expectPrefill.department,
+      );
+      await expect(dialog.getByTestId('eval360-batch-evaluatee-work-project')).toHaveValue(
+        expectPrefill.workProject,
       );
     }
     await dialog.getByTestId('eval360-batch-evaluator-names').fill(evaluator.name);

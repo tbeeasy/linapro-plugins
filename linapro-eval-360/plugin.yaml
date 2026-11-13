@@ -5,7 +5,7 @@ id: linapro-eval-360
 name: 360 度绩效测评
 
 # 插件语义化版本号，当前示例统一使用带 `v` 前缀的写法。
-version: v0.1.1
+version: v0.1.2
 
 # 插件类型枚举。`source` 表示随宿主源码编译交付；`dynamic` 表示作为运行时动态插件产物加载。
 type: source

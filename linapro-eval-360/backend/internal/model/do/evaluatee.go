@@ -21,4 +21,5 @@ type Evaluatee struct {
 	UpdatedAt       *time.Time //
 	JobTitle        any        // 被评估人职务（导入/新增弹窗录入，可空）
 	Department      any        // 被评估人部门（导入/新增弹窗录入，可空）
+	WorkProject     any        // 被评估人所在项目（导入/新增弹窗录入，可空；与测评项目 project_id 无关）
 }

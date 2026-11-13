@@ -106,7 +106,7 @@ func (s *serviceImpl) CopyQuestionnaire(ctx context.Context, id int64, title str
 			roleMap[r.Id] = nid
 		}
 
-		// 3. 被评估人 → evalMap（职务/部门一并复制）。
+		// 3. 被评估人 → evalMap（职务/部门/项目一并复制）。
 		evalMap := make(map[int64]int64)
 		var evaluatees []*entitymodel.Evaluatee
 		if err = dao.Evaluatee.Ctx(ctx).
@@ -119,6 +119,7 @@ func (s *serviceImpl) CopyQuestionnaire(ctx context.Context, id int64, title str
 				EvaluateeEmpId: e.EvaluateeEmpId,
 				JobTitle:       e.JobTitle,
 				Department:     e.Department,
+				WorkProject:    e.WorkProject,
 			}).InsertAndGetId()
 			if insErr != nil {
 				return insErr

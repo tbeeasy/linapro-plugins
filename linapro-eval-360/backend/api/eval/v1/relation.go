@@ -118,13 +118,14 @@ type RelationMatrix struct {
 
 // EvaluateeRow 是某被评估人下的评价者明细。
 type EvaluateeRow struct {
-	EvaluateeID         int64        `json:"evaluateeId" dc:"被评估人内部 id（问卷级）" eg:"5"`
-	EvaluateeEmpID      int64        `json:"evaluateeEmpId" dc:"被评估人 EmpID" eg:"1001"`
-	EvaluateeName       string       `json:"evaluateeName" dc:"被评估人姓名" eg:"张三"`
-	EvaluateeNo         string       `json:"evaluateeNo" dc:"被评估人工号" eg:"E001"`
-	EvaluateeJobTitle   string       `json:"evaluateeJobTitle" dc:"被评估人职务（问卷级录入文本，未填写为空串）" eg:"销售总监"`
-	EvaluateeDepartment string       `json:"evaluateeDepartment" dc:"被评估人部门（问卷级录入文本，未填写为空串）" eg:"华东销售部"`
-	Groups              []*RoleGroup `json:"groups" dc:"按角色分组的评价者列表" eg:"[]"`
+	EvaluateeID          int64        `json:"evaluateeId" dc:"被评估人内部 id（问卷级）" eg:"5"`
+	EvaluateeEmpID       int64        `json:"evaluateeEmpId" dc:"被评估人 EmpID" eg:"1001"`
+	EvaluateeName        string       `json:"evaluateeName" dc:"被评估人姓名" eg:"张三"`
+	EvaluateeNo          string       `json:"evaluateeNo" dc:"被评估人工号" eg:"E001"`
+	EvaluateeJobTitle    string       `json:"evaluateeJobTitle" dc:"被评估人职务（问卷级录入文本，未填写为空串）" eg:"销售总监"`
+	EvaluateeDepartment  string       `json:"evaluateeDepartment" dc:"被评估人部门（问卷级录入文本，未填写为空串）" eg:"华东销售部"`
+	EvaluateeWorkProject string       `json:"evaluateeWorkProject" dc:"Project the evaluatee works on (questionnaire-level free text, unrelated to the evaluation project; empty string when not filled in)" eg:"星火项目"`
+	Groups               []*RoleGroup `json:"groups" dc:"按角色分组的评价者列表" eg:"[]"`
 }
 
 // RoleGroup 是某角色下的评价者列表。
@@ -169,7 +170,7 @@ type EmployeeOption struct {
 
 // AddRelationReq 批量新增评价关系（「新增评价关系」/「编辑」弹窗，只录入姓名不录入工号）。
 type AddRelationReq struct {
-	g.Meta          `path:"/relation" method:"post" tags:"Eval360 Relation" summary:"新增评价关系" dc:"一次批量新增评价关系（被评估人姓名/职务/部门、评价者姓名、角色，不录入工号）。姓名按在职员工跨租户精确匹配：任一姓名存在在职同名员工或找不到在职员工时整体拒绝、不写入任何数据，错误提示列出全部问题姓名；离职的同名员工不计入重名。评价关系仅新增不更新；被评估人已存在时，非空的职务/部门覆盖原值，留空保留原值。" permission:"eval:360:relation:manage"`
+	g.Meta          `path:"/relation" method:"post" tags:"Eval360 Relation" summary:"新增评价关系" dc:"一次批量新增评价关系（被评估人姓名/职务/部门/项目、评价者姓名、角色，不录入工号）。姓名按在职员工跨租户精确匹配：任一姓名存在在职同名员工或找不到在职员工时整体拒绝、不写入任何数据，错误提示列出全部问题姓名；离职的同名员工不计入重名。评价关系仅新增不更新；被评估人已存在时，非空的职务/部门/项目覆盖原值，留空保留原值。" permission:"eval:360:relation:manage"`
 	QuestionnaireId int64 `json:"questionnaireId" v:"required|min:1#缺少问卷 id|问卷 id 非法" dc:"问卷 id" eg:"10"`
 	// Items 的条目上限（500）由服务层校验：GoFrame 的 max-length 对切片按 JSON 文本长度计算，不能用来限制条数。
 	Items []*AddRelationItem `json:"items" v:"required#请至少填写一条评价关系" dc:"Relations to add, 1 to 500 items per request (more than 500 is rejected with EVAL360_RELATION_ITEMS_TOO_MANY). Nothing is written unless every item passes validation; all items are then written in one transaction." eg:"[{\"evaluateeName\":\"张三\",\"evaluatorName\":\"李四\",\"roleName\":\"上级\"}]"`
@@ -177,11 +178,12 @@ type AddRelationReq struct {
 
 // AddRelationItem 是一条待新增的评价关系。
 type AddRelationItem struct {
-	EvaluateeName       string `json:"evaluateeName" v:"required#请填写被评估人姓名" dc:"Evaluatee name; must match exactly one active employee" eg:"张三"`
-	EvaluateeJobTitle   string `json:"evaluateeJobTitle" v:"max-length:100#被评估人职务不能超过 100 个字" dc:"Evaluatee job title (optional, at most 100 characters); when empty, an existing evaluatee keeps its current value" eg:"销售总监"`
-	EvaluateeDepartment string `json:"evaluateeDepartment" v:"max-length:200#被评估人部门不能超过 200 个字" dc:"Evaluatee department (optional, at most 200 characters); when empty, an existing evaluatee keeps its current value" eg:"华东销售部"`
-	EvaluatorName       string `json:"evaluatorName" v:"required#请填写评价者姓名" dc:"Evaluator name; must match exactly one active employee" eg:"李四"`
-	RoleName            string `json:"roleName" v:"required#请填写角色" dc:"Role name; normalized, then the existing role is reused or a new one is created" eg:"上级"`
+	EvaluateeName        string `json:"evaluateeName" v:"required#请填写被评估人姓名" dc:"Evaluatee name; must match exactly one active employee" eg:"张三"`
+	EvaluateeJobTitle    string `json:"evaluateeJobTitle" v:"max-length:100#被评估人职务不能超过 100 个字" dc:"Evaluatee job title (optional, at most 100 characters); when empty, an existing evaluatee keeps its current value" eg:"销售总监"`
+	EvaluateeDepartment  string `json:"evaluateeDepartment" v:"max-length:200#被评估人部门不能超过 200 个字" dc:"Evaluatee department (optional, at most 200 characters); when empty, an existing evaluatee keeps its current value" eg:"华东销售部"`
+	EvaluateeWorkProject string `json:"evaluateeWorkProject" v:"max-length:200#项目不能超过 200 个字" dc:"Project the evaluatee works on (optional, at most 200 characters, unrelated to the evaluation project); when empty, an existing evaluatee keeps its current value" eg:"星火项目"`
+	EvaluatorName        string `json:"evaluatorName" v:"required#请填写评价者姓名" dc:"Evaluator name; must match exactly one active employee" eg:"李四"`
+	RoleName             string `json:"roleName" v:"required#请填写角色" dc:"Role name; normalized, then the existing role is reused or a new one is created" eg:"上级"`
 }
 
 // AddRelationRes 返回新评价关系 id（与 items 顺序一致）。

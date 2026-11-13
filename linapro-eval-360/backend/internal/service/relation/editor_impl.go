@@ -126,13 +126,14 @@ func (s *serviceImpl) ListRelations(ctx context.Context, questionnaireID int64) 
 		}
 		brief := empMap[e.EvaluateeEmpId]
 		evalRows = append(evalRows, &EvaluateeRow{
-			EvaluateeID:         e.Id,
-			EvaluateeEmpID:      e.EvaluateeEmpId,
-			EvaluateeName:       brief.Name,
-			EvaluateeNo:         brief.EmployeeNo,
-			EvaluateeJobTitle:   e.JobTitle,
-			EvaluateeDepartment: e.Department,
-			Groups:              groups,
+			EvaluateeID:          e.Id,
+			EvaluateeEmpID:       e.EvaluateeEmpId,
+			EvaluateeName:        brief.Name,
+			EvaluateeNo:          brief.EmployeeNo,
+			EvaluateeJobTitle:    e.JobTitle,
+			EvaluateeDepartment:  e.Department,
+			EvaluateeWorkProject: e.WorkProject,
+			Groups:               groups,
 		})
 	}
 
@@ -190,7 +191,7 @@ func toEmployeeOption(emp *empcap.Employee) *EmployeeOption {
 //
 // 先把全部条目的被评估人、评价者姓名一次解析（规则见 relation_resolve.go），收集**全部**在职重名
 // 与找不到的姓名：任一非空即整体拒绝、不写入任何数据，错误参数 names 列出这些姓名（优先报重名）。
-// 全部解析通过后在单事务内写入：被评估人查已有、没有才建（职务/部门按条目顺序合并，后出现的非空值
+// 全部解析通过后在单事务内写入：被评估人查已有、没有才建（职务/部门/项目按条目顺序合并，后出现的非空值
 // 覆盖前值，再以「非空覆盖、空保留」写入既有被评估人）；角色查已有、没有才建；评价关系为纯 INSERT。
 func (s *serviceImpl) AddRelations(ctx context.Context, in AddRelationsInput) ([]int64, error) {
 	if len(in.Items) == 0 {
@@ -222,10 +223,11 @@ func (s *serviceImpl) AddRelations(ctx context.Context, in AddRelationsInput) ([
 			evaluateeName: normalizePersonName(it.EvaluateeName),
 			evaluatorName: normalizePersonName(it.EvaluatorName),
 			roleName:      NormalizeRoleName(it.RoleName),
-			// 职务/部门与导入同一归一化口径；长度上限由 API 层 max-length 校验兜住。
+			// 职务/部门/项目与导入同一归一化口径；长度上限由 API 层 max-length 校验兜住。
 			profile: evaluateeProfile{
-				JobTitle:   textutil.NormalizeName(it.EvaluateeJobTitle),
-				Department: textutil.NormalizeName(it.EvaluateeDepartment),
+				JobTitle:    textutil.NormalizeName(it.EvaluateeJobTitle),
+				Department:  textutil.NormalizeName(it.EvaluateeDepartment),
+				WorkProject: textutil.NormalizeName(it.EvaluateeWorkProject),
 			},
 		}
 		if n.evaluateeName == "" || n.evaluatorName == "" {
@@ -267,7 +269,7 @@ func (s *serviceImpl) AddRelations(ctx context.Context, in AddRelationsInput) ([
 		return nil, bizerr.NewCode(CodeEmployeeNameNotFound, bizerr.P("names", strings.Join(missing, "、")))
 	}
 
-	// 自评拦截，并按被评估人合并职务/部门（后出现的非空值覆盖前值）。
+	// 自评拦截，并按被评估人合并职务/部门/项目（后出现的非空值覆盖前值）。
 	profiles := make(map[int64]evaluateeProfile)
 	for _, it := range items {
 		eeID, erID := byName[it.evaluateeName].emp.EmpID, byName[it.evaluatorName].emp.EmpID
@@ -280,6 +282,9 @@ func (s *serviceImpl) AddRelations(ctx context.Context, in AddRelationsInput) ([
 		}
 		if it.profile.Department != "" {
 			merged.Department = it.profile.Department
+		}
+		if it.profile.WorkProject != "" {
+			merged.WorkProject = it.profile.WorkProject
 		}
 		profiles[eeID] = merged
 	}

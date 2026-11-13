@@ -191,7 +191,7 @@ function beforeUpload(file: File) {
 }
 
 // ---- 关系编辑 ----
-// 工具栏「新增评价关系」：五栏按行录入（被评估人姓名/职务/部门、评价者姓名、角色），不录入工号——
+// 工具栏「新增评价关系」：六栏按行录入（被评估人姓名/职务/部门/项目、评价者姓名、角色），不录入工号——
 // 后端按在职员工姓名匹配，任一姓名在职重名或找不到时整批拒绝并点名。
 // 角色为自由文本，后端按名称 upsert，不依赖预先配置的角色。
 function openAdd() {
@@ -215,7 +215,7 @@ function openEdit(row: EvaluateeRow, roleId: number) {
   editModalApi.open();
 }
 
-// 角色列的「新增」按钮：复用批量录入弹窗，预填当前行被评估人的姓名/职务/部门，
+// 角色列的「新增」按钮：复用批量录入弹窗，预填当前行被评估人的姓名/职务/部门/项目，
 // 用户只需补录评价人即可，无需重复输入被评估人。
 function openAddForEvaluatee(row: EvaluateeRow) {
   batchAddModalApi.setData({
@@ -223,6 +223,7 @@ function openAddForEvaluatee(row: EvaluateeRow) {
     evaluateeName: row.evaluateeName,
     evaluateeJobTitle: row.evaluateeJobTitle,
     evaluateeDepartment: row.evaluateeDepartment,
+    evaluateeWorkProject: row.evaluateeWorkProject,
   });
   batchAddModalApi.open();
 }
@@ -282,7 +283,7 @@ const weightSum = computed(() => {
   return sum;
 });
 
-// 关系明细列：被评估人 + 职务 + 部门 + 各角色（动态）。
+// 关系明细列：被评估人 + 职务 + 部门 + 项目 + 各角色（动态）。
 // 注意：这里用的是 ant-design-vue 的 Table，列配置必须用 dataIndex/key，
 // 单元格收敛到 #bodyCell 插槽渲染（vxe-grid 的 field/slots/params 在这里会被忽略，导致整表空白）。
 const matrixColumns = computed(() => {
@@ -303,6 +304,12 @@ const matrixColumns = computed(() => {
       dataIndex: "evaluateeDepartment",
       key: "evaluateeDepartment",
       title: $t("plugin.linapro-eval-360.page.relation.evaluateeDepartment"),
+      width: 160,
+    },
+    {
+      dataIndex: "evaluateeWorkProject",
+      key: "evaluateeWorkProject",
+      title: $t("plugin.linapro-eval-360.page.relation.evaluateeWorkProject"),
       width: 160,
     },
   ];
@@ -382,11 +389,12 @@ const matrixData = computed(() => matrix.value?.evaluatees ?? []);
         <!-- 角色列统一走 #bodyCell（antd 的插槽名）：左为评价人明细，右为「编辑」按钮，
              同一角色多人一人一行，已评价 / 未评价分组展示。 -->
         <template #bodyCell="{ record, column }">
-          <!-- 职务/部门为可选录入：未填写时显示占位符，与空角色单元格一致。 -->
+          <!-- 职务/部门/项目为可选录入：未填写时显示占位符，与空角色单元格一致。 -->
           <template
             v-if="
               column.key === 'evaluateeJobTitle' ||
-              column.key === 'evaluateeDepartment'
+              column.key === 'evaluateeDepartment' ||
+              column.key === 'evaluateeWorkProject'
             "
           >
             <span

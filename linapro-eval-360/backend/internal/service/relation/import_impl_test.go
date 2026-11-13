@@ -1,10 +1,10 @@
-// import_impl_test.go 覆盖评价关系全量导入/导出的语义（FB-13 职务/部门、FB-32 按姓名导入）。
+// import_impl_test.go 覆盖评价关系全量导入/导出的语义（FB-13 职务/部门、FB-32 按姓名导入、FB-2 项目）。
 //
 // 与 openspec/changes/linapro-eval-360/specs/linapro-eval-360/spec.md「Excel 全量导入评价关系」
 // 「关系编辑器」需求一致：
-//  1. 模板列为 被评估人姓名/职务/部门/评价者姓名/角色（不含工号），导入按表头识别列；
-//  2. 同一被评估人多行的职务/部门取首个非空值，留空不报错；
-//  3. 同一被评估人出现不同的非空职务（或部门）→ 该行失败、整批不写入；
+//  1. 模板列为 被评估人姓名/职务/部门/项目/评价者姓名/角色（不含工号），导入按表头识别列；
+//  2. 同一被评估人多行的职务/部门/项目取首个非空值，留空不报错；
+//  3. 同一被评估人出现不同的非空职务（或部门、项目）→ 该行失败、整批不写入；
 //  4. 导出在模板列基础上保留两个工号列，导出文件可原样再导入（工号列忽略）；
 //  5. 姓名有两名及以上在职同名员工 → 该行失败并点名、整批不写入；离职同名员工不算重名。
 //
@@ -107,7 +107,7 @@ func seedProfileFixture(t *testing.T, ctx context.Context) *profileFixture {
 	return fixture
 }
 
-// buildImportXLSX 按生产模板表头生成导入文件；rows 每行 5 列，顺序同 importHeaders。
+// buildImportXLSX 按生产模板表头生成导入文件；rows 每行 6 列，顺序同 importHeaders。
 func buildImportXLSX(t *testing.T, rows [][]string) *bytes.Reader {
 	t.Helper()
 	return buildXLSX(t, importHeaders(), rows)
@@ -143,8 +143,8 @@ func buildXLSX(t *testing.T, header []string, rows [][]string) *bytes.Reader {
 }
 
 // importRowOf 拼一行导入数据（不含工号）：被评估人 ee、评价者 er 取自 fixture 员工。
-func importRowOf(ee, er empcap.Employee, jobTitle, department, role string) []string {
-	return []string{ee.Name, jobTitle, department, er.Name, role}
+func importRowOf(ee, er empcap.Employee, jobTitle, department, workProject, role string) []string {
+	return []string{ee.Name, jobTitle, department, workProject, er.Name, role}
 }
 
 // seedHomonym 在 tenantID 下新建一名与 name 同名的员工（工号唯一），departed=true 时置为离职；
@@ -196,16 +196,17 @@ func columnOf(t *testing.T, header []string, name string) int {
 	return 0
 }
 
-// evaluateeProfileOf 读取问卷下某员工作为被评估人的职务/部门（不存在返回 nil）。
+// evaluateeProfileOf 读取问卷下某员工作为被评估人的职务/部门/项目（不存在返回 nil）。
 func evaluateeProfileOf(t *testing.T, ctx context.Context, questionnaireID, empID int64) *evaluateeProfile {
 	t.Helper()
 
 	var row *struct {
-		JobTitle   string `orm:"job_title"`
-		Department string `orm:"department"`
+		JobTitle    string `orm:"job_title"`
+		Department  string `orm:"department"`
+		WorkProject string `orm:"work_project"`
 	}
 	if err := dao.Evaluatee.Ctx(ctx).
-		Fields(dao.Evaluatee.Columns().JobTitle, dao.Evaluatee.Columns().Department).
+		Fields(dao.Evaluatee.Columns().JobTitle, dao.Evaluatee.Columns().Department, dao.Evaluatee.Columns().WorkProject).
 		Where(dao.Evaluatee.Columns().QuestionnaireId, questionnaireID).
 		Where(dao.Evaluatee.Columns().EvaluateeEmpId, empID).
 		Scan(&row); err != nil {
@@ -214,29 +215,29 @@ func evaluateeProfileOf(t *testing.T, ctx context.Context, questionnaireID, empI
 	if row == nil {
 		return nil
 	}
-	return &evaluateeProfile{JobTitle: row.JobTitle, Department: row.Department}
+	return &evaluateeProfile{JobTitle: row.JobTitle, Department: row.Department, WorkProject: row.WorkProject}
 }
 
-// TestMergeEvaluateeProfile 覆盖同一被评估人多行职务/部门的合并规则。
+// TestMergeEvaluateeProfile 覆盖同一被评估人多行职务/部门/项目的合并规则。
 func TestMergeEvaluateeProfile(t *testing.T) {
 	cases := []struct {
-		name       string
-		prev       evaluateeProfile
-		jobTitle   string
-		department string
-		want       evaluateeProfile
-		wantFail   bool
+		name     string
+		prev     evaluateeProfile
+		next     evaluateeProfile
+		want     evaluateeProfile
+		wantFail bool
 	}{
-		{name: "首行写入", prev: evaluateeProfile{}, jobTitle: "总监", department: "销售部", want: evaluateeProfile{"总监", "销售部"}},
-		{name: "后续留空保留", prev: evaluateeProfile{"总监", "销售部"}, want: evaluateeProfile{"总监", "销售部"}},
-		{name: "相同值放行", prev: evaluateeProfile{"总监", "销售部"}, jobTitle: "总监", department: "销售部", want: evaluateeProfile{"总监", "销售部"}},
-		{name: "首行留空后续补齐", prev: evaluateeProfile{JobTitle: "总监"}, department: "销售部", want: evaluateeProfile{"总监", "销售部"}},
-		{name: "职务冲突", prev: evaluateeProfile{"总监", ""}, jobTitle: "经理", want: evaluateeProfile{"总监", ""}, wantFail: true},
-		{name: "部门冲突", prev: evaluateeProfile{"", "销售部"}, department: "市场部", want: evaluateeProfile{"", "销售部"}, wantFail: true},
+		{name: "首行写入", next: evaluateeProfile{"总监", "销售部", "星火"}, want: evaluateeProfile{"总监", "销售部", "星火"}},
+		{name: "后续留空保留", prev: evaluateeProfile{"总监", "销售部", "星火"}, want: evaluateeProfile{"总监", "销售部", "星火"}},
+		{name: "相同值放行", prev: evaluateeProfile{"总监", "销售部", "星火"}, next: evaluateeProfile{"总监", "销售部", "星火"}, want: evaluateeProfile{"总监", "销售部", "星火"}},
+		{name: "首行留空后续补齐", prev: evaluateeProfile{JobTitle: "总监"}, next: evaluateeProfile{Department: "销售部", WorkProject: "星火"}, want: evaluateeProfile{"总监", "销售部", "星火"}},
+		{name: "职务冲突", prev: evaluateeProfile{JobTitle: "总监"}, next: evaluateeProfile{JobTitle: "经理"}, want: evaluateeProfile{JobTitle: "总监"}, wantFail: true},
+		{name: "部门冲突", prev: evaluateeProfile{Department: "销售部"}, next: evaluateeProfile{Department: "市场部"}, want: evaluateeProfile{Department: "销售部"}, wantFail: true},
+		{name: "项目冲突", prev: evaluateeProfile{WorkProject: "星火"}, next: evaluateeProfile{WorkProject: "燎原"}, want: evaluateeProfile{WorkProject: "星火"}, wantFail: true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, reason := mergeEvaluateeProfile(c.prev, c.jobTitle, c.department)
+			got, reason := mergeEvaluateeProfile(c.prev, c.next)
 			if (reason != "") != c.wantFail {
 				t.Fatalf("冲突判定期望 %v，实际原因 %q", c.wantFail, reason)
 			}
@@ -247,20 +248,28 @@ func TestMergeEvaluateeProfile(t *testing.T) {
 	}
 }
 
-// TestResolveRowProfile 覆盖单行职务/部门的归一化与长度上限（与 evaluatee 表 VARCHAR 宽度一致）。
+// TestResolveRowProfile 覆盖单行职务/部门/项目的归一化与长度上限（与 evaluatee 表 VARCHAR 宽度一致）。
 func TestResolveRowProfile(t *testing.T) {
-	got, reason := resolveRowProfile(evaluateeProfile{}, "  销售　总监 ", " 华东  销售部")
-	if reason != "" || got != (evaluateeProfile{JobTitle: "销售 总监", Department: "华东 销售部"}) {
+	got, reason := resolveRowProfile(evaluateeProfile{}, evaluateeProfile{
+		JobTitle: "  销售　总监 ", Department: " 华东  销售部", WorkProject: "　星火  项目 ",
+	})
+	if reason != "" || got != (evaluateeProfile{JobTitle: "销售 总监", Department: "华东 销售部", WorkProject: "星火 项目"}) {
 		t.Fatalf("归一化结果异常：%+v，原因 %q", got, reason)
 	}
-	if _, reason = resolveRowProfile(evaluateeProfile{}, strings.Repeat("职", maxJobTitleLen), ""); reason != "" {
+	if _, reason = resolveRowProfile(evaluateeProfile{}, evaluateeProfile{JobTitle: strings.Repeat("职", maxJobTitleLen)}); reason != "" {
 		t.Fatalf("职务恰好 %d 字应放行，实际原因 %q", maxJobTitleLen, reason)
 	}
-	if _, reason = resolveRowProfile(evaluateeProfile{}, strings.Repeat("职", maxJobTitleLen+1), ""); reason == "" {
+	if _, reason = resolveRowProfile(evaluateeProfile{}, evaluateeProfile{JobTitle: strings.Repeat("职", maxJobTitleLen+1)}); reason == "" {
 		t.Fatalf("职务超过 %d 字应判失败", maxJobTitleLen)
 	}
-	if _, reason = resolveRowProfile(evaluateeProfile{}, "", strings.Repeat("部", maxDepartmentLen+1)); reason == "" {
+	if _, reason = resolveRowProfile(evaluateeProfile{}, evaluateeProfile{Department: strings.Repeat("部", maxDepartmentLen+1)}); reason == "" {
 		t.Fatalf("部门超过 %d 字应判失败", maxDepartmentLen)
+	}
+	if _, reason = resolveRowProfile(evaluateeProfile{}, evaluateeProfile{WorkProject: strings.Repeat("项", maxWorkProjectLen)}); reason != "" {
+		t.Fatalf("项目恰好 %d 字应放行，实际原因 %q", maxWorkProjectLen, reason)
+	}
+	if _, reason = resolveRowProfile(evaluateeProfile{}, evaluateeProfile{WorkProject: strings.Repeat("项", maxWorkProjectLen+1)}); reason == "" {
+		t.Fatalf("项目超过 %d 字应判失败", maxWorkProjectLen)
 	}
 }
 
@@ -300,11 +309,11 @@ func TestImportRelationsStoresEvaluateeProfile(t *testing.T) {
 	result, err := svc.ImportRelations(ctx, ImportInput{
 		QuestionnaireID: f.questionnaireID,
 		Reader: buildImportXLSX(t, [][]string{
-			importRowOf(eeA, er, "销售总监", "", "上级"),
-			// 同一被评估人第二行：职务留空不冲突，部门在此补齐。
-			importRowOf(eeA, eeB, "", " 华东销售部 ", "平级"),
-			// 被评估人 B 职务/部门都不填（可选）。
-			importRowOf(eeB, er, "", "", "上级"),
+			importRowOf(eeA, er, "销售总监", "", "", "上级"),
+			// 同一被评估人第二行：职务留空不冲突，部门、项目在此补齐。
+			importRowOf(eeA, eeB, "", " 华东销售部 ", " 星火项目 ", "平级"),
+			// 被评估人 B 职务/部门/项目都不填（可选）。
+			importRowOf(eeB, er, "", "", "", "上级"),
 		}),
 	})
 	if err != nil {
@@ -314,16 +323,17 @@ func TestImportRelationsStoresEvaluateeProfile(t *testing.T) {
 		t.Fatalf("期望成功 3 条失败 0 条，实际 %+v", result)
 	}
 
+	wantA := evaluateeProfile{JobTitle: "销售总监", Department: "华东销售部", WorkProject: "星火项目"}
 	gotA := evaluateeProfileOf(t, ctx, f.questionnaireID, eeA.EmpID)
-	if gotA == nil || *gotA != (evaluateeProfile{JobTitle: "销售总监", Department: "华东销售部"}) {
-		t.Fatalf("被评估人 A 职务/部门期望 销售总监/华东销售部，实际 %+v", gotA)
+	if gotA == nil || *gotA != wantA {
+		t.Fatalf("被评估人 A 职务/部门/项目期望 %+v，实际 %+v", wantA, gotA)
 	}
 	gotB := evaluateeProfileOf(t, ctx, f.questionnaireID, eeB.EmpID)
 	if gotB == nil || *gotB != (evaluateeProfile{}) {
-		t.Fatalf("被评估人 B 职务/部门期望为空，实际 %+v", gotB)
+		t.Fatalf("被评估人 B 职务/部门/项目期望为空，实际 %+v", gotB)
 	}
 
-	// 导出：模板列 + 两个工号列，被评估人 A 的两行都回填职务/部门。
+	// 导出：模板列 + 两个工号列，被评估人 A 的两行都回填职务/部门/项目。
 	data, err := svc.ExportRelations(ctx, f.questionnaireID)
 	if err != nil {
 		t.Fatalf("导出失败：%v", err)
@@ -332,7 +342,7 @@ func TestImportRelationsStoresEvaluateeProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("解析导出文件失败：%v", err)
 	}
-	wantHeader := []string{"被评估人姓名", "被评估人工号", "被评估人职务", "被评估人部门", "评价者姓名", "评价者工号", "角色"}
+	wantHeader := []string{"被评估人姓名", "被评估人工号", "被评估人职务", "被评估人部门", "项目", "评价者姓名", "评价者工号", "角色"}
 	if len(sheet.Header) != len(wantHeader) {
 		t.Fatalf("导出表头期望 %v，实际 %v", wantHeader, sheet.Header)
 	}
@@ -340,9 +350,10 @@ func TestImportRelationsStoresEvaluateeProfile(t *testing.T) {
 		testkit.Equal(t, fmt.Sprintf("导出表头第 %d 列", i+1), sheet.Header[i], h)
 	}
 	var (
-		colNo   = columnOf(t, sheet.Header, "被评估人工号")
-		colJob  = columnOf(t, sheet.Header, "被评估人职务")
-		colDept = columnOf(t, sheet.Header, "被评估人部门")
+		colNo      = columnOf(t, sheet.Header, "被评估人工号")
+		colJob     = columnOf(t, sheet.Header, "被评估人职务")
+		colDept    = columnOf(t, sheet.Header, "被评估人部门")
+		colProject = columnOf(t, sheet.Header, "项目")
 	)
 	exportedA := 0
 	for _, row := range sheet.Rows {
@@ -352,13 +363,14 @@ func TestImportRelationsStoresEvaluateeProfile(t *testing.T) {
 		exportedA++
 		testkit.Equal(t, "导出职务", cellAt(row, colJob), "销售总监")
 		testkit.Equal(t, "导出部门", cellAt(row, colDept), "华东销售部")
+		testkit.Equal(t, "导出项目", cellAt(row, colProject), "星火项目")
 	}
 	if exportedA != 2 {
 		t.Fatalf("被评估人 A 期望导出 2 行，实际 %d 行", exportedA)
 	}
 }
 
-// TestImportRelationsRejectsConflictingEvaluateeProfile 同一被评估人不同的非空职务 → 该行失败、整批不写入。
+// TestImportRelationsRejectsConflictingEvaluateeProfile 同一被评估人不同的非空职务（或项目）→ 该行失败、整批不写入。
 func TestImportRelationsRejectsConflictingEvaluateeProfile(t *testing.T) {
 	ctx := testkit.Setup(t)
 	f := seedProfileFixture(t, ctx)
@@ -367,16 +379,21 @@ func TestImportRelationsRejectsConflictingEvaluateeProfile(t *testing.T) {
 	result, err := New().ImportRelations(ctx, ImportInput{
 		QuestionnaireID: f.questionnaireID,
 		Reader: buildImportXLSX(t, [][]string{
-			importRowOf(eeA, er, "销售总监", "华东销售部", "上级"),
-			importRowOf(eeA, eeB, "销售经理", "", "平级"),
+			importRowOf(eeA, er, "销售总监", "华东销售部", "星火项目", "上级"),
+			importRowOf(eeA, eeB, "销售经理", "", "", "平级"),
+			// 被评估人 B 的项目前后不一致：第 5 行失败。
+			importRowOf(eeB, er, "", "", "燎原项目", "上级"),
+			importRowOf(eeB, eeA, "", "", "星火项目", "平级"),
 		}),
 	})
 	if err != nil {
 		t.Fatalf("导入不应返回错误（冲突走失败清单）：%v", err)
 	}
-	if result.Success != 0 || result.Fail != 1 || len(result.FailList) != 1 || result.FailList[0].Row != 3 {
-		t.Fatalf("期望第 3 行失败且无成功，实际 %+v", result)
+	if result.Success != 0 || result.Fail != 2 || len(result.FailList) != 2 ||
+		result.FailList[0].Row != 3 || result.FailList[1].Row != 5 {
+		t.Fatalf("期望第 3、5 行失败且无成功，实际 %+v", result)
 	}
+	testkit.Equal(t, "项目冲突原因", result.FailList[1].Reason, "项目「星火项目」与该被评估人此前填写的「燎原项目」不一致")
 	if got := evaluateeProfileOf(t, ctx, f.questionnaireID, eeA.EmpID); got != nil {
 		t.Fatalf("冲突时整批不应写入被评估人，实际 %+v", got)
 	}
@@ -392,8 +409,8 @@ func TestImportRelationsReimportsExportedFile(t *testing.T) {
 	if _, err := svc.ImportRelations(ctx, ImportInput{
 		QuestionnaireID: f.questionnaireID,
 		Reader: buildImportXLSX(t, [][]string{
-			importRowOf(eeA, er, "销售总监", "华东销售部", "上级"),
-			importRowOf(eeB, er, "", "", "平级"),
+			importRowOf(eeA, er, "销售总监", "华东销售部", "星火项目", "上级"),
+			importRowOf(eeB, er, "", "", "", "平级"),
 		}),
 	}); err != nil {
 		t.Fatalf("首次导入失败：%v", err)
@@ -414,8 +431,8 @@ func TestImportRelationsReimportsExportedFile(t *testing.T) {
 		t.Fatalf("%s：期望 2 条评价关系，实际 %d", "再导入后评价关系条数", n)
 	}
 	if got := evaluateeProfileOf(t, ctx, f.questionnaireID, eeA.EmpID); got == nil ||
-		*got != (evaluateeProfile{JobTitle: "销售总监", Department: "华东销售部"}) {
-		t.Fatalf("再导入后被评估人 A 职务/部门期望保留，实际 %+v", got)
+		*got != (evaluateeProfile{JobTitle: "销售总监", Department: "华东销售部", WorkProject: "星火项目"}) {
+		t.Fatalf("再导入后被评估人 A 职务/部门/项目期望保留，实际 %+v", got)
 	}
 }
 
@@ -430,8 +447,8 @@ func TestImportRelationsRejectsDuplicateName(t *testing.T) {
 	result, err := New().ImportRelations(ctx, ImportInput{
 		QuestionnaireID: f.questionnaireID,
 		Reader: buildImportXLSX(t, [][]string{
-			importRowOf(eeB, er, "", "", "上级"),
-			importRowOf(eeA, er, "", "", "上级"),
+			importRowOf(eeB, er, "", "", "", "上级"),
+			importRowOf(eeA, er, "", "", "", "上级"),
 		}),
 	})
 	if err != nil {
@@ -456,7 +473,7 @@ func TestImportRelationsIgnoresDepartedHomonym(t *testing.T) {
 
 	result, err := New().ImportRelations(ctx, ImportInput{
 		QuestionnaireID: f.questionnaireID,
-		Reader:          buildImportXLSX(t, [][]string{importRowOf(eeA, er, "", "", "上级")}),
+		Reader:          buildImportXLSX(t, [][]string{importRowOf(eeA, er, "", "", "", "上级")}),
 	})
 	if err != nil {
 		t.Fatalf("导入失败：%v", err)
@@ -485,7 +502,7 @@ func TestImportRelationsRejectsUnknownName(t *testing.T) {
 	result, err := New().ImportRelations(ctx, ImportInput{
 		QuestionnaireID: f.questionnaireID,
 		Reader: buildImportXLSX(t, [][]string{
-			importRowOf(eeA, empcap.Employee{Name: "不存在的人FB32"}, "", "", "上级"),
+			importRowOf(eeA, empcap.Employee{Name: "不存在的人FB32"}, "", "", "", "上级"),
 		}),
 	})
 	if err != nil {

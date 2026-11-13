@@ -443,6 +443,8 @@ export interface EvaluateeRow {
   // 被评估人职务/部门（问卷级录入文本，未填写为空串）。
   evaluateeJobTitle: string;
   evaluateeDepartment: string;
+  // 被评估人所在项目（问卷级录入文本，与测评项目无关；未填写为空串）。
+  evaluateeWorkProject: string;
   groups: RoleGroup[];
 }
 
@@ -481,6 +483,7 @@ export interface AddRelationItem {
   // 可选：被评估人已存在时，非空值覆盖原值、空/缺省保留原值。
   evaluateeJobTitle?: string;
   evaluateeDepartment?: string;
+  evaluateeWorkProject?: string;
   evaluatorName: string;
   roleName: string;
 }
