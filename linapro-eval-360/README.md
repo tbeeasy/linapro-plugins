@@ -142,6 +142,18 @@ or `https://host/admin/eval-360/emp/login` (history router).
   when resolving employee numbers through `empcap`. The plugin does not touch
   Lark OAuth.
 
+## Lifecycle and data retention
+
+- **Uninstall keeps the tables**: `manifest/sql/uninstall/` holds comments only, zero DDL.
+  Even when "purge data" is ticked on the plugin page (it is on by default), questionnaires,
+  evaluatees, evaluation relations and every answer record survive; reinstalling picks up
+  where it left off. Same stance as `linapro-monitor-apilog` — assessment records are
+  append-only, and uninstall is not a data-destruction path.
+- Dropping the data for real is a manual `DROP TABLE`; back up first.
+- Reinstall converges: every install statement is idempotent (`CREATE TABLE IF NOT EXISTS`,
+  `ADD COLUMN IF NOT EXISTS`, `CREATE UNIQUE INDEX IF NOT EXISTS`), so existing tables are
+  never left at a stale shape.
+
 ## Local employee-side debugging
 
 The employee side normally obtains its JWT through Lark silent login. Locally,

@@ -1,14 +1,16 @@
-DROP TABLE IF EXISTS plugin_linapro_eval_360_answer;
-DROP TABLE IF EXISTS plugin_linapro_eval_360_submission;
-DROP TABLE IF EXISTS plugin_linapro_eval_360_relation;
-DROP TABLE IF EXISTS plugin_linapro_eval_360_evaluatee;
-DROP TABLE IF EXISTS plugin_linapro_eval_360_role;
-DROP TABLE IF EXISTS plugin_linapro_eval_360_matrix_column;
-DROP TABLE IF EXISTS plugin_linapro_eval_360_matrix_row;
-DROP TABLE IF EXISTS plugin_linapro_eval_360_question_option;
-DROP TABLE IF EXISTS plugin_linapro_eval_360_question_excluded_evaluator;
-DROP TABLE IF EXISTS plugin_linapro_eval_360_question_visibility;
-DROP TABLE IF EXISTS plugin_linapro_eval_360_question;
-DROP TABLE IF EXISTS plugin_linapro_eval_360_dimension;
-DROP TABLE IF EXISTS plugin_linapro_eval_360_questionnaire;
-DROP TABLE IF EXISTS plugin_linapro_eval_360_project;
+-- 001: linapro-eval-360 卸载脚本
+-- 001: linapro-eval-360 uninstall
+--
+-- 本文件**故意不含任何 DDL**：测评数据只增不删，语义与 linapro-monitor-apilog 一致。
+--   - 不写 DROP TABLE：卸载后问卷结构、被评估人、评价关系与全部作答记录仍在，
+--     重新安装即可继续使用；插件管理页的「清理数据」勾选对本插件不会删表。
+--   - 不写 DELETE：没有任何删除路径，卸载不构成数据销毁入口。
+--   - 不写菜单清理：宿主卸载时已按 `plugin:<plugin-id>:%` 前缀删除 sys_menu 与 sys_role_menu。
+--
+-- 重装收敛：安装 SQL 全部是幂等语句，旧表不会被跳过成残缺结构——
+--   001 用 CREATE TABLE IF NOT EXISTS 建缺失表并跳过已存在表；
+--   002/003/004/006/007 用 CREATE UNIQUE INDEX IF NOT EXISTS 与
+--   ADD COLUMN IF NOT EXISTS / DROP COLUMN IF EXISTS 把既有表收敛到当前结构。
+--
+-- 若要真正删除这些表，只能人工执行 DROP TABLE，且应先自行备份。
+-- 这不是插件能做的操作，这是本设计的意图。

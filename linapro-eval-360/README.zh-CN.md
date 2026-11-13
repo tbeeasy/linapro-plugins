@@ -95,6 +95,16 @@ README；该分组未配置、或其中任一条目凭据为空（lark-push 判�
   租户仅在调用 `empcap` 解析工号时经 `EmpContext.TenantID` 进入。本插件不碰飞书
   OAuth。
 
+## 生命周期与数据保留
+
+- **卸载不删表**：`manifest/sql/uninstall/` 只留注释、零 DDL。插件管理页即使勾选
+  「清理数据」（该选项默认勾选）卸载，问卷结构、被评估人、评价关系与全部作答记录
+  仍然保留，重新安装后可直接续用。此口径与 `linapro-monitor-apilog` 一致——
+  测评记录只增不删，卸载不是数据销毁入口。
+- 要真正清空数据只能人工 `DROP TABLE`，请先自行备份。
+- 重装收敛：安装 SQL 全部幂等（`CREATE TABLE IF NOT EXISTS`、`ADD COLUMN IF NOT EXISTS`、
+  `CREATE UNIQUE INDEX IF NOT EXISTS`），旧表不会被跳过成残缺结构。
+
 ## 本地调试员工端
 
 员工端正常需经飞书免登拿员工 JWT。本地可用开发工具
