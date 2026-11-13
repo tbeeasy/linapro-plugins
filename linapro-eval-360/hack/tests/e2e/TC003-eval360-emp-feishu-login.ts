@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Page } from '@host-tests/support/playwright';
 
 import { expect, test } from '../../../../../../hack/tests/fixtures/auth';
 import { adminStorageStatePath } from '../../../../../../hack/tests/fixtures/auth-state';

@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { request, type APIRequestContext, type Page } from '@playwright/test';
+import { request, type APIRequestContext, type Page } from '@host-tests/support/playwright';
 import * as XLSX from 'xlsx';
 
 import { config, pluginApiPath } from '../../../../../../hack/tests/fixtures/config';

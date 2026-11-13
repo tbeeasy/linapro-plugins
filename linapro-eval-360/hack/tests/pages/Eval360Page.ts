@@ -1,4 +1,6 @@
-import { expect, type Locator, type Page } from '@playwright/test';
+// 经宿主再导出引用 Playwright：插件目录不在 hack/tests 的 node_modules 解析链上，
+// ESM 加载时裸写 '@playwright/test' 会解析失败（官方插件同样走 @host-tests 别名）。
+import { expect, type Locator, type Page } from '@host-tests/support/playwright';
 
 import { workspacePath } from '../../../../../../hack/tests/fixtures/config';
 
@@ -30,12 +32,29 @@ export class Eval360Page {
     await expect(this.page.getByTestId('eval360-project-list')).toBeVisible();
   }
 
-  projectRow(name: string): Locator {
-    return this.page.locator('tr', { hasText: name }).first();
+  // 项目列表为卡片式布局（非表格），按项目名过滤卡片。
+  projectCard(name: string): Locator {
+    return this.page.getByTestId('eval360-project-card').filter({ hasText: name }).first();
+  }
+
+  // 卡片操作行默认 invisible、仅 hover 时显现：先悬停卡片使按钮可点，再返回该卡片。
+  async hoverProjectCard(name: string): Promise<Locator> {
+    const card = this.projectCard(name);
+    await card.hover();
+    return card;
+  }
+
+  // 状态分段筛选（全部 / 草稿 / 进行中 / 已结束），按译文文案点选。
+  async filterProjectStatus(label: string) {
+    await this.page
+      .getByTestId('eval360-project-list')
+      .locator('.ant-radio-group')
+      .getByText(label, { exact: true })
+      .click();
   }
 
   // createProject 经真实 UI 在项目抽屉中新建项目：名称、描述、起止日期（date-only）。
-  // 断言落到业务结果——列表刷新后出现新建的项目行与其描述列。
+  // 断言落到业务结果——列表刷新后出现新建项目的卡片。
   async createProject(
     name: string,
     description = '',
@@ -60,12 +79,13 @@ export class Eval360Page {
       await this.page.keyboard.press('Enter');
     }
     await drawer.getByRole('button', { name: confirmButtonPattern }).click();
-    // 列表刷新后新项目行可见（业务结果：项目已落库并出现在列表）。
-    await expect(this.page.getByText(name).first()).toBeVisible();
+    // 列表刷新后新项目卡片可见（业务结果：项目已落库并出现在列表）。
+    await expect(this.projectCard(name)).toBeVisible();
   }
 
   async openProject(name: string) {
-    await this.projectRow(name).getByTestId('eval360-project-detail').click();
+    const card = await this.hoverProjectCard(name);
+    await card.getByTestId('eval360-project-detail').click();
     await expect(this.page.getByTestId('eval360-project-detail-panel')).toBeVisible();
   }
 
