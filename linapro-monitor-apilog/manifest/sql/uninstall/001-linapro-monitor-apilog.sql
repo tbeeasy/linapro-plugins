@@ -1,0 +1,11 @@
+-- 001: linapro-monitor-apilog 卸载脚本
+-- 001: linapro-monitor-apilog uninstall
+--
+-- 本文件**故意不含任何 DDL**：记录只增不删（见 design D9）。
+--   - 不写 DROP TABLE：卸载后数据仍在，重新安装即可继续使用。
+--   - 不写 DROP SEQUENCE：序列随表保留，重装后 id 继续递增，不会与历史记录撞号。
+--   - 不写 DELETE：没有任何删除路径。
+--   - 不写菜单清理：宿主卸载时已按 `plugin:<plugin-id>:%` 前缀删除 sys_menu 与 sys_role_menu。
+--
+-- 若要真正删除这张表，只能人工执行 DROP TABLE，且应先自行备份。
+-- 这不是插件能做的操作，这是本设计的意图。

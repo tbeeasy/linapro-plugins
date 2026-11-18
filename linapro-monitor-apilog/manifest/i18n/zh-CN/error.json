@@ -1,0 +1,27 @@
+{
+  "error": {
+    "monitor": {
+      "apilog": {
+        "not": {
+          "found": "接口请求日志不存在"
+        },
+        "time": {
+          "range": {
+            "required": "请选择请求时间范围"
+          }
+        },
+        "invalid": {
+          "time": "请求时间格式不正确"
+        },
+        "query": {
+          "failed": "查询接口请求日志失败"
+        },
+        "request": {
+          "at": {
+            "required": "查询详情时 requestAt 必填：记录表按 request_at 分区"
+          }
+        }
+      }
+    }
+  }
+}

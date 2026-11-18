@@ -1,0 +1,27 @@
+# CLI tool, only in development environment.
+# https://goframe.org/docs/cli
+gfcli:
+  gen:
+    dao:
+      - link: "pgsql:postgres:postgres@tcp(127.0.0.1:5432)/linapro?sslmode=disable"
+        path: "internal"
+        # 只列父表：分区表若也列进来，会为每个分区各生成一个 model。
+        tables: "plugin_linapro_monitor_apilog"
+        removePrefix: "plugin_linapro_monitor_"
+        importPrefix: "lina-plugin-linapro-monitor-apilog/backend/internal"
+        descriptionTag: true
+        noModelComment: true
+        stdTime: true
+        typeMapping:
+          timestamp:
+            type: "*time.Time"
+            import: time
+          "timestamp without time zone":
+            type: "*time.Time"
+            import: time
+          timestamptz:
+            type: "*time.Time"
+            import: time
+          "timestamp with time zone":
+            type: "*time.Time"
+            import: time

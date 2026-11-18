@@ -1,0 +1,8 @@
+{
+  "plugin": {
+    "linapro-monitor-apilog": {
+      "name": "System Monitor - Interface Request Logs",
+      "description": "Automatically records complete requests and responses for non-admin interface calls, searchable by caller and path. Records are append-only."
+    }
+  }
+}

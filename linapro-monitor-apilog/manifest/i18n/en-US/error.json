@@ -1,0 +1,27 @@
+{
+  "error": {
+    "monitor": {
+      "apilog": {
+        "not": {
+          "found": "Interface request log does not exist"
+        },
+        "time": {
+          "range": {
+            "required": "A request time range is required"
+          }
+        },
+        "invalid": {
+          "time": "Invalid request time value"
+        },
+        "query": {
+          "failed": "Failed to query interface request logs"
+        },
+        "request": {
+          "at": {
+            "required": "requestAt is required to read the detail: records are partitioned by it"
+          }
+        }
+      }
+    }
+  }
+}
