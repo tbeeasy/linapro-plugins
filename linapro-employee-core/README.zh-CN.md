@@ -17,13 +17,24 @@
 
 | 配置键 | 用途 |
 |---|---|
-| `plugin.linapro-employee-core.lark_apps` | 飞书身份应用数组：`app_id`、`secret_key`、可选`assoc` |
+| `plugin.linapro-employee-core.lark_apps` | 飞书应用平铺数组：`app_id`、`secret_key`、可选`name`（后台展示名，留空则界面只显示`app_id`）、可选`assoc`、可选`identity_app_id`（见下） |
 | `plugin.linapro-employee-core.emp_jwt_secret` | 员工 JWT 签名密钥；缺失时登录与`EmpAuth`失败关闭 |
 | `plugin.linapro-employee-core.moka.*` | 同步任务使用的 Moka HCM 凭据 |
 | `plugin.linapro-employee-core.sync_interval_minutes` | 同步任务在每小时的第几分钟执行（默认`0`） |
 | sys_config`plugin.linapro-employee-core.dept_tenant_map` | JSON`{"顶层部门名": tenant_id}`；为空时同步中止 |
 
-密钥不落库。消息推送用的应用凭据不在这里，属于`linapro-lark-push`。
+`lark_apps`登记两类应用，以有无`identity_app_id`区分：
+
+| 类型 | `identity_app_id` | 行为 |
+|---|---|---|
+| 身份应用 | 不填 | 通讯录同步、写`lark_identity`、出现在后台「绑定飞书身份」下拉；登录按`open_id`查员工 |
+| 免登应用 | 某个身份应用的`app_id` | 只用于员工端免登（如「360测评助手」网页应用），同步与后台下拉都看不到它；登录用它自己的凭据换票取`user_id`，按（`identity_app_id`，`user_id`）查员工，`user_id`为空即拒绝 |
+
+`identity_app_id`须指向同一清单里的身份应用（不能指向自身或另一个免登应用），`app_id`不得重复，
+否则登录与同步都返回`PLUGIN_EMPLOYEE_CORE_LARK_APPS_CONFIG_INVALID`。免登应用须在飞书后台开通
+「获取用户 user ID」权限。
+
+密钥不落库。消息推送用的应用凭据不在这里，属于`linapro-lark-push`（推送应用可以同时在这里登记为免登应用）。
 
 ## 它不拥有什么
 

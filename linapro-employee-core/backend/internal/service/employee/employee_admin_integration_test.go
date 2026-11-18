@@ -51,7 +51,7 @@ func seedAdminEmployees(t *testing.T, ctx context.Context, tenant int, svc *Serv
 			t.Fatalf("seed %s: %v", sd.key, err)
 		}
 		if sd.status == empcap.StatusDeparted {
-			if err = svc.MarkDeparted(ctx, tenant, id); err != nil {
+			if err = svc.MarkDeparted(ctx, tenant, id, ""); err != nil {
 				t.Fatalf("mark departed %s: %v", sd.key, err)
 			}
 		}

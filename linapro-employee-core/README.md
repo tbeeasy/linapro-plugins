@@ -43,14 +43,27 @@ not touch business tables.
 
 | Key | Purpose |
 |---|---|
-| `plugin.linapro-employee-core.lark_apps` | Array of Lark identity apps: `app_id`, `secret_key`, optional `assoc` |
+| `plugin.linapro-employee-core.lark_apps` | Flat array of Lark apps: `app_id`, `secret_key`, optional `name` (admin display name; the UI falls back to `app_id` when empty), optional `assoc`, optional `identity_app_id` (see below) |
 | `plugin.linapro-employee-core.emp_jwt_secret` | Employee JWT signing key; login and `EmpAuth` fail closed when missing |
 | `plugin.linapro-employee-core.moka.*` | Moka HCM credentials used by the sync job |
 | `plugin.linapro-employee-core.sync_interval_minutes` | Minute of each hour at which the sync job runs (default `0`) |
 | sys_config `plugin.linapro-employee-core.dept_tenant_map` | JSON `{"top-level department name": tenant_id}`; sync aborts when empty |
 
+`lark_apps` holds two kinds of apps, told apart by `identity_app_id`:
+
+| Kind | `identity_app_id` | Behavior |
+|---|---|---|
+| Identity app | empty | Directory sync, writes `lark_identity`, listed in the admin "bind Lark identity" dropdown; login resolves the employee by `open_id` |
+| Login app | an identity app's `app_id` | Used only for employee login (e.g. the "360 Assessment Assistant" web app); skipped by sync and the admin dropdown. Login exchanges the code with its own credentials, takes the `user_id`, and resolves the employee by (`identity_app_id`, `user_id`); an empty `user_id` is rejected |
+
+`identity_app_id` must point to an identity app in the same list (not itself or
+another login app), and `app_id` must be unique. Otherwise both login and sync
+fail with `PLUGIN_EMPLOYEE_CORE_LARK_APPS_CONFIG_INVALID`. A login app needs the
+"Obtain user ID" permission in the Lark console.
+
 Secrets are never stored in the database. Message-push app credentials are not
-here; they belong to `linapro-lark-push`.
+here; they belong to `linapro-lark-push` (a push app may also be registered here
+as a login app).
 
 ## What it does NOT own
 

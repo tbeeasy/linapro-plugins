@@ -16,16 +16,19 @@ type fakeEmployees struct {
 	resolveErr   error
 	gotAppID     string
 	gotOpenID    string
-	tenantID     int
-	name         string
-	employeeNo   string
-	departed     bool
+	gotUserID    string
+	// byUserID 记录是否走了 ResolveEmpIDByLarkUserID（免登应用路径）。
+	byUserID   bool
+	tenantID   int
+	name       string
+	employeeNo string
+	departed   bool
 }
 
 func (f *fakeEmployees) UpsertEmployee(context.Context, int, empcap.Profile) (int64, error) {
 	return 0, nil
 }
-func (f *fakeEmployees) MarkDeparted(context.Context, int, int64) error { return nil }
+func (f *fakeEmployees) MarkDeparted(context.Context, int, int64, string) error { return nil }
 func (f *fakeEmployees) GetByID(context.Context, int64) (*empcap.Employee, error) {
 	status := empcap.StatusActive
 	if f.departed {
@@ -56,7 +59,10 @@ func (f *fakeEmployees) ResolveEmpIDByLarkIdentity(_ context.Context, appID, ope
 	f.gotOpenID = openID
 	return f.resolveEmpID, f.resolveErr
 }
-func (f *fakeEmployees) ResolveEmpIDByLarkUserID(context.Context, string, string) (int64, error) {
+func (f *fakeEmployees) ResolveEmpIDByLarkUserID(_ context.Context, appID, userID string) (int64, error) {
+	f.byUserID = true
+	f.gotAppID = appID
+	f.gotUserID = userID
 	return f.resolveEmpID, f.resolveErr
 }
 func (f *fakeEmployees) UpsertLarkIdentity(context.Context, string, string, string, string, int64) error {
@@ -123,6 +129,48 @@ func TestLoginResolvesRegisteredIdentity(t *testing.T) {
 	}
 	if emp.gotAppID != "cli_f" || emp.gotOpenID != "ou_known" {
 		t.Fatalf("expected lark identity lookup with app+open_id, got app=%q open=%q", emp.gotAppID, emp.gotOpenID)
+	}
+	if emp.byUserID {
+		t.Fatal("身份应用登录不应走 user_id 查询")
+	}
+}
+
+// TestLoginViaLoginAppResolvesByIdentityUserID 验证免登应用（凭据带 IdentityAppID）登录：
+// 换票用免登应用自己的凭据，员工按 (identity_app_id, user_id) 查，而不是按免登应用的 open_id 查
+// ——lark_identity 只按身份应用写入，免登应用的 open_id 在表里不存在。
+func TestLoginViaLoginAppResolvesByIdentityUserID(t *testing.T) {
+	emp := &fakeEmployees{resolveEmpID: 20, tenantID: 7, name: "李四", employeeNo: "GZ002000"}
+	prov := &fakeProvider{identity: lark.LoginIdentity{OpenID: "ou_eval360", UserID: "u_lisi"}}
+	s := newTestService(emp, prov, lark.Credential{AppID: "cli_eval360", AppSecret: "s", IdentityAppID: "cli_identity"})
+
+	res, err := s.Login(context.Background(), "cli_eval360", "code")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if !emp.byUserID || emp.gotAppID != "cli_identity" || emp.gotUserID != "u_lisi" {
+		t.Fatalf("应按 (identity_app_id, user_id) 查员工, got byUserID=%v app=%q user=%q",
+			emp.byUserID, emp.gotAppID, emp.gotUserID)
+	}
+	if emp.gotOpenID != "" {
+		t.Fatalf("免登应用不应按 open_id 查, got %q", emp.gotOpenID)
+	}
+	if res.EmpID != 20 || res.TenantID != 7 || res.Token != "test-token" {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+}
+
+// TestLoginViaLoginAppRejectsEmptyUserID 验证免登应用换票未拿到 user_id（如未开通
+// 「获取用户 user ID」权限）时以未授权拒绝，且不去查员工。
+func TestLoginViaLoginAppRejectsEmptyUserID(t *testing.T) {
+	emp := &fakeEmployees{resolveEmpID: 20}
+	prov := &fakeProvider{identity: lark.LoginIdentity{OpenID: "ou_eval360"}}
+	s := newTestService(emp, prov, lark.Credential{AppID: "cli_eval360", AppSecret: "s", IdentityAppID: "cli_identity"})
+
+	if _, err := s.Login(context.Background(), "cli_eval360", "code"); !errors.Is(err, empcap.ErrUnauthorized) {
+		t.Fatalf("expected ErrUnauthorized, got %v", err)
+	}
+	if emp.byUserID || emp.gotOpenID != "" {
+		t.Fatal("user_id 为空时不应查员工")
 	}
 }
 

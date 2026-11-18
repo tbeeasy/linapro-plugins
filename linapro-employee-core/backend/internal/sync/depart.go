@@ -25,6 +25,9 @@ func (s *Syncer) reconcileDeparted(
 	sum *Summary,
 ) error {
 	departedNos := make([]string, 0)
+	// leaveDateByNo 保留每个离职工号在 Moka 上的离职日期，随标记一并落库。
+	// 按首次出现的工号去重（与 departedNos 顺序一致），重复工号不影响结果。
+	leaveDateByNo := make(map[string]string, len(mokaList))
 	seen := make(map[string]struct{})
 	for _, me := range mokaList {
 		if me.Status == MokaStatusActive || me.EmployeeNo == "" {
@@ -35,6 +38,7 @@ func (s *Syncer) reconcileDeparted(
 		}
 		seen[me.EmployeeNo] = struct{}{}
 		departedNos = append(departedNos, me.EmployeeNo)
+		leaveDateByNo[me.EmployeeNo] = me.LeaveDate
 	}
 	if len(departedNos) == 0 {
 		return nil
@@ -50,7 +54,7 @@ func (s *Syncer) reconcileDeparted(
 		if !ok || emp.Status == empcap.StatusDeparted {
 			continue // 本地无此员工，或已是离职态，无需重复标记
 		}
-		if err := s.employees.MarkDeparted(ctx, emp.TenantID, emp.EmpID); err != nil {
+		if err := s.employees.MarkDeparted(ctx, emp.TenantID, emp.EmpID, leaveDateByNo[no]); err != nil {
 			logger.Errorf(ctx, "员工目录同步-离职对账: 标记员工离职失败 empID=%d: %v", emp.EmpID, err)
 			sum.Errors++
 			continue

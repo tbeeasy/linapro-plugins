@@ -92,11 +92,15 @@ CREATE TABLE IF NOT EXISTS plugin_linapro_employee_core_lark_identity (
     "created_at"   TIMESTAMPTZ,
     PRIMARY KEY ("lark_app_id", "lark_open_id")
 );
--- 兼容既有测试库：表可能由早前版本创建、缺少后续迁移列。CREATE TABLE IF NOT EXISTS
+-- 兼容既有测试库：表可能由早前版本创建、缺少后续补充的列。CREATE TABLE IF NOT EXISTS
 -- 不会补列，且 GoFrame 会静默丢弃引用不存在列的 Where 条件（导致 id_source 过滤失效），
--- 故显式 ADD COLUMN IF NOT EXISTS 对齐 003/004 迁移。
+-- 故显式 ADD COLUMN IF NOT EXISTS 与 manifest/sql/001 的终态对齐。
 ALTER TABLE plugin_linapro_employee_core_lark_identity ADD COLUMN IF NOT EXISTS "lark_user_id" VARCHAR(128) NOT NULL DEFAULT '';
 ALTER TABLE plugin_linapro_employee_core_lark_identity ADD COLUMN IF NOT EXISTS "id_source" VARCHAR(16) NOT NULL DEFAULT 'own';
+-- 三个可空任职日期列。
+ALTER TABLE plugin_linapro_employee_core_employee ADD COLUMN IF NOT EXISTS "on_boarding_date" DATE;
+ALTER TABLE plugin_linapro_employee_core_employee ADD COLUMN IF NOT EXISTS "end_probation_date" DATE;
+ALTER TABLE plugin_linapro_employee_core_employee ADD COLUMN IF NOT EXISTS "leave_date" DATE;
 `); err != nil {
 		t.Fatalf("ensure employee test tables failed: %v", err)
 	}
@@ -730,7 +734,7 @@ func TestUpsertRestoresActiveStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err = svc.MarkDeparted(ctx, tenant, id); err != nil {
+	if err = svc.MarkDeparted(ctx, tenant, id, ""); err != nil {
 		t.Fatalf("mark departed: %v", err)
 	}
 
@@ -888,5 +892,113 @@ func TestUpsertLarkIdentityAtomic(t *testing.T) {
 		if n != 1 {
 			t.Fatalf("round %d: want exactly 1 row after concurrent upserts, got %d", round, n)
 		}
+	}
+}
+
+// TestEmploymentDatesRoundTrip 验证三个任职日期的落库与读取语义：
+// Moka 提供的日期写入 DATE 列并在 empcap 读模型中按 YYYY-MM-DD 输出；
+// 空字符串落 NULL（读回为空字符串）；重新入职时旧的离职日期被清空。
+func TestEmploymentDatesRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	configureEmployeeTestDB(t, ctx)
+	tenant := nextTenant()
+	cleanupTenant(t, ctx, tenant)
+	empNo := uniqueEmployeeNo("dates", tenant)
+	svc := New()
+
+	id, err := svc.UpsertEmployee(ctx, tenant, empcap.Profile{
+		Name:             "Dora",
+		EmployeeNo:       empNo,
+		OnBoardingDate:   "2021-03-01",
+		EndProbationDate: "2021-06-01",
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// 空字符串必须落 NULL，且读模型把它还原为空字符串。
+	got, err := svc.GetByID(ctx, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.OnBoardingDate != "2021-03-01" {
+		t.Fatalf("want on-boarding 2021-03-01, got %q", got.OnBoardingDate)
+	}
+	if got.EndProbationDate != "2021-06-01" {
+		t.Fatalf("want probation end 2021-06-01, got %q", got.EndProbationDate)
+	}
+	if got.LeaveDate != "" {
+		t.Fatalf("want empty leave date, got %q", got.LeaveDate)
+	}
+
+	// 离职对账写入离职日期，状态与日期在同一次更新落库。
+	if err = svc.MarkDeparted(ctx, tenant, id, "2024-08-31"); err != nil {
+		t.Fatalf("mark departed: %v", err)
+	}
+	got, err = svc.GetByID(ctx, id)
+	if err != nil {
+		t.Fatalf("get after departed: %v", err)
+	}
+	if got.Status != empcap.StatusDeparted {
+		t.Fatalf("want departed, got status %d", got.Status)
+	}
+	if got.LeaveDate != "2024-08-31" {
+		t.Fatalf("want leave date 2024-08-31, got %q", got.LeaveDate)
+	}
+
+	// 重新入职：本轮 Moka 不再给离职日期，旧的 leave_date 必须被清成 NULL，
+	// 否则会出现「在职 + 有离职日期」的矛盾行。
+	if _, err = svc.UpsertEmployee(ctx, tenant, empcap.Profile{
+		Name:           "Dora",
+		EmployeeNo:     empNo,
+		OnBoardingDate: "2025-01-06",
+	}); err != nil {
+		t.Fatalf("rehire: %v", err)
+	}
+	got, err = svc.GetByID(ctx, id)
+	if err != nil {
+		t.Fatalf("get after rehire: %v", err)
+	}
+	if got.Status != empcap.StatusActive {
+		t.Fatalf("want active after rehire, got %d", got.Status)
+	}
+	if got.LeaveDate != "" {
+		t.Fatalf("rehire must clear stale leave date, got %q", got.LeaveDate)
+	}
+	if got.OnBoardingDate != "2025-01-06" {
+		t.Fatalf("want on-boarding 2025-01-06, got %q", got.OnBoardingDate)
+	}
+	if got.EndProbationDate != "" {
+		t.Fatalf("want probation end cleared, got %q", got.EndProbationDate)
+	}
+}
+
+// TestMarkDepartedEmptyLeaveDateWritesNull 验证 MarkDeparted 在 Moka 未提供
+// 离职日期时把列显式写成 NULL（而不是跳过该列留下旧值）。
+func TestMarkDepartedEmptyLeaveDateWritesNull(t *testing.T) {
+	ctx := context.Background()
+	configureEmployeeTestDB(t, ctx)
+	tenant := nextTenant()
+	cleanupTenant(t, ctx, tenant)
+	empNo := uniqueEmployeeNo("nulldate", tenant)
+	svc := New()
+
+	id, err := svc.UpsertEmployee(ctx, tenant, empcap.Profile{
+		Name:       "Ned",
+		EmployeeNo: empNo,
+		LeaveDate:  "2024-05-01",
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err = svc.MarkDeparted(ctx, tenant, id, ""); err != nil {
+		t.Fatalf("mark departed: %v", err)
+	}
+	got, err := svc.GetByID(ctx, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.LeaveDate != "" {
+		t.Fatalf("want leave date cleared to NULL, got %q", got.LeaveDate)
 	}
 }

@@ -11,7 +11,7 @@ type fakeService struct{}
 func (fakeService) UpsertEmployee(context.Context, int, Profile) (int64, error) {
 	return 1, nil
 }
-func (fakeService) MarkDeparted(context.Context, int, int64) error { return nil }
+func (fakeService) MarkDeparted(context.Context, int, int64, string) error { return nil }
 func (fakeService) GetByID(context.Context, int64) (*Employee, error) {
 	return &Employee{EmpID: 1, Status: StatusActive}, nil
 }
@@ -175,6 +175,54 @@ func TestGetByEmployeeNoAndGetByNameFacadeRoundTrip(t *testing.T) {
 	emp, err = svc.GetByName(ctx, 1, "Alice")
 	if err != nil || emp == nil || emp.EmpID != 1 {
 		t.Fatalf("GetByName: got emp=%v err=%v", emp, err)
+	}
+}
+
+// nameFakeService 在 fakeService 之上绑定一张固定的「姓名 → 员工行」映射，
+// 用于验证按姓名批量取员工行的门面透传。
+type nameFakeService struct {
+	fakeService
+	byName map[string][]*Employee
+	err    error
+}
+
+func (s nameFakeService) MapByNamesAnyTenant(context.Context, []string) (map[string][]*Employee, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.byName, nil
+}
+
+// TestEmployeesByNamesAnyTenant 验证门面原样透传批量结果，含同名多行与离职行（筛选由消费方负责）。
+func TestEmployeesByNamesAnyTenant(t *testing.T) {
+	defer BindEmployeeService(BoundEmployeeService()) // restore process-global binding
+
+	want := map[string][]*Employee{
+		"张三": {{EmpID: 1, Name: "张三", EmployeeNo: "E1", Status: StatusActive}},
+		"李四": {
+			{EmpID: 2, Name: "李四", EmployeeNo: "E2", Status: StatusActive},
+			{EmpID: 3, Name: "李四", EmployeeNo: "E2", Status: StatusDeparted},
+		},
+	}
+	BindEmployeeService(nameFakeService{byName: want})
+
+	got, err := EmployeesByNamesAnyTenant(context.Background(), []string{"张三", "李四"})
+	if err != nil {
+		t.Fatalf("EmployeesByNamesAnyTenant: %v", err)
+	}
+	if len(got["张三"]) != 1 || len(got["李四"]) != 2 {
+		t.Fatalf("应原样返回同名全部员工行: %+v", got)
+	}
+}
+
+// TestEmployeesByNamesAnyTenantUnbound 验证员工服务未绑定时返回明确错误：
+// 静默返回空映射会表现成「所有姓名都不存在」，掩盖装配缺陷。
+func TestEmployeesByNamesAnyTenantUnbound(t *testing.T) {
+	defer BindEmployeeService(BoundEmployeeService()) // restore process-global binding
+
+	BindEmployeeService(nil)
+	if _, err := EmployeesByNamesAnyTenant(context.Background(), []string{"张三"}); err == nil {
+		t.Fatal("未绑定时应返回错误而不是空映射")
 	}
 }
 

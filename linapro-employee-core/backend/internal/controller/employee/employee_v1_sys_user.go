@@ -44,11 +44,12 @@ func (c *ControllerV1) sysUserName(ctx context.Context, sysUserID int) (username
 }
 
 // userIDToInt 把宿主用户 id（字符串形态）转成员工表 sys_user_id 所用的 int。
-// 解析失败返回 0——调用方把 0 视为「未关联」，不会误绑到别的账号上。
-func userIDToInt(id usercap.UserID) int {
+// 解析失败或结果非正数时返回 ok=false——调用方必须跳过该候选，不能退化成 0，
+// 因为 0 在 SetSysUser 语义里表示「取消关联」，静默归零会清空已有关联。
+func userIDToInt(id usercap.UserID) (int, bool) {
 	n, err := strconv.Atoi(string(id))
-	if err != nil {
-		return 0
+	if err != nil || n <= 0 {
+		return 0, false
 	}
-	return n
+	return n, true
 }

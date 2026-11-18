@@ -8,19 +8,34 @@
 -- 凭证说明：飞书 App Secret 不落库，改从本插件私有配置
 -- plugin.linapro-employee-core.lark_apps（飞书应用数组）读取，该配置已被
 -- .gitignore 忽略、不提交版本库。
+--
+-- 本文件是 linapro-employee-core 唯一的版本 SQL：本迭代内的所有列、索引变更
+-- （原 003 的 lark_user_id、004 的 id_source、005 的姓名索引、006 的三个任职
+-- 日期列）均已并入此处，不在 manifest/sql/ 下另开同迭代文件。
+-- 幂等：全部语句带 IF NOT EXISTS / ADD COLUMN IF NOT EXISTS，可重复执行。
 -- ------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS plugin_linapro_employee_core_employee (
-    "id"               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    "tenant_id"        INT NOT NULL DEFAULT 0,
-    "name"             VARCHAR(191) NOT NULL DEFAULT '',
-    "moka_employee_no" VARCHAR(64)  NOT NULL DEFAULT '',
-    "status"           SMALLINT NOT NULL DEFAULT 1,
-    "sys_user_id"      INT NOT NULL DEFAULT 0,
-    "created_at"       TIMESTAMPTZ,
-    "updated_at"       TIMESTAMPTZ,
-    "deleted_at"       TIMESTAMPTZ
+    "id"                BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    "tenant_id"         INT NOT NULL DEFAULT 0,
+    "name"              VARCHAR(191) NOT NULL DEFAULT '',
+    "moka_employee_no"  VARCHAR(64)  NOT NULL DEFAULT '',
+    "status"            SMALLINT NOT NULL DEFAULT 1,
+    "sys_user_id"       INT NOT NULL DEFAULT 0,
+    "on_boarding_date"  DATE,
+    "end_probation_date" DATE,
+    "leave_date"        DATE,
+    "created_at"        TIMESTAMPTZ,
+    "updated_at"        TIMESTAMPTZ,
+    "deleted_at"        TIMESTAMPTZ
 );
+
+-- 兼容早前版本创建的表：CREATE TABLE IF NOT EXISTS 不会补列，故显式补齐。
+-- 三个任职日期均可空：Moka 未下发时为 NULL，每轮同步快照覆盖（员工重新入职
+-- 必须把旧 leave_date 覆盖回 NULL，避免「在职 + 有离职日期」的矛盾行）。
+ALTER TABLE plugin_linapro_employee_core_employee ADD COLUMN IF NOT EXISTS "on_boarding_date" DATE;
+ALTER TABLE plugin_linapro_employee_core_employee ADD COLUMN IF NOT EXISTS "end_probation_date" DATE;
+ALTER TABLE plugin_linapro_employee_core_employee ADD COLUMN IF NOT EXISTS "leave_date" DATE;
 
 COMMENT ON TABLE plugin_linapro_employee_core_employee IS '租户内员工身份表，归 linapro-employee-core 管理；id 为内部 EmpID，业务数据引用此值；飞书身份映射见 lark_identity 表';
 COMMENT ON COLUMN plugin_linapro_employee_core_employee."id" IS '内部 EmpID：与身份提供方无关的代理主键，所有业务数据引用此值';
@@ -29,6 +44,9 @@ COMMENT ON COLUMN plugin_linapro_employee_core_employee."name" IS '员工姓名�
 COMMENT ON COLUMN plugin_linapro_employee_core_employee."moka_employee_no" IS 'Moka HR 系统工号（如 GZ001198）；同租户内非空值唯一，是员工行存在的稳定锚点；未接入 Moka 时为空字符串';
 COMMENT ON COLUMN plugin_linapro_employee_core_employee."status" IS '在职状态：1=在职，0=离职；EmpAuth 每次请求查询此字段以实时拦截离职员工';
 COMMENT ON COLUMN plugin_linapro_employee_core_employee."sys_user_id" IS '可选关联：该员工同时是后台管理员时回填对应 sys_user.id；否则为 0';
+COMMENT ON COLUMN plugin_linapro_employee_core_employee."on_boarding_date" IS '入职日期（Moka on_boarding_date）；Moka 未提供时为 NULL，每轮同步快照覆盖';
+COMMENT ON COLUMN plugin_linapro_employee_core_employee."end_probation_date" IS '转正日期（Moka end_probation_date）；Moka 未提供时为 NULL，每轮同步快照覆盖';
+COMMENT ON COLUMN plugin_linapro_employee_core_employee."leave_date" IS '离职日期（Moka leave_date）；在职或 Moka 未提供时为 NULL，每轮同步快照覆盖';
 COMMENT ON COLUMN plugin_linapro_employee_core_employee."created_at" IS '创建时间';
 COMMENT ON COLUMN plugin_linapro_employee_core_employee."updated_at" IS '更新时间';
 COMMENT ON COLUMN plugin_linapro_employee_core_employee."deleted_at" IS '软删除时间；存活行为 NULL';
@@ -37,6 +55,12 @@ COMMENT ON COLUMN plugin_linapro_employee_core_employee."deleted_at" IS '软删�
 CREATE UNIQUE INDEX IF NOT EXISTS uk_plugin_linapro_employee_core_emp_tenant_moka_no
     ON plugin_linapro_employee_core_employee ("tenant_id", "moka_employee_no")
     WHERE "deleted_at" IS NULL AND "moka_employee_no" <> '';
+
+-- 姓名索引：支撑 empcap.MapByNamesAnyTenant 按姓名集合跨租户批量查询
+-- （linapro-eval-360 评价关系按姓名录入、导入时一次 WhereIn 解析全部姓名并判定重名），
+-- 避免全表扫描。普通索引（非唯一）：同名员工合法存在，重名由消费方判定。
+CREATE INDEX IF NOT EXISTS idx_plugin_linapro_employee_core_emp_name
+    ON plugin_linapro_employee_core_employee ("name");
 
 CREATE TABLE IF NOT EXISTS plugin_linapro_employee_core_employee_dept (
     "id"                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -60,6 +84,9 @@ CREATE INDEX IF NOT EXISTS idx_plugin_linapro_employee_core_dept_tenant_emp
 -- 飞书身份映射：每个 (lark_app_id, lark_open_id) 一条，映射到 emp_id。同一员工横跨
 -- 飞书企业 F 与 G 时有两条（每个 app 一条），都指向同一 emp_id。登录按主键解析 emp_id；
 -- emp_id 索引支持反查与清理。
+-- lark_user_id 是企业级 user_id，供考勤等只按 user_id 推送的数据源反查 EmpID；
+-- id_source 区分本租户原生身份（own，可登录/反查）与关联组织视角身份
+-- （assoc，仅供写多维表格人员字段，绝不参与登录/反查）。
 CREATE TABLE IF NOT EXISTS plugin_linapro_employee_core_lark_identity (
     "lark_app_id"  VARCHAR(128) NOT NULL DEFAULT '',
     "lark_open_id" VARCHAR(191) NOT NULL DEFAULT '',
@@ -69,6 +96,12 @@ CREATE TABLE IF NOT EXISTS plugin_linapro_employee_core_lark_identity (
     "created_at"   TIMESTAMPTZ,
     PRIMARY KEY ("lark_app_id", "lark_open_id")
 );
+
+-- 兼容早前版本创建的表：补齐后加的 user_id 与 id_source 列。
+-- GoFrame 会静默丢弃引用不存在列的 Where 条件，缺列会让 own 过滤静默失效，
+-- 因此这两列必须显式补齐，不能只依赖上面的建表语句。
+ALTER TABLE plugin_linapro_employee_core_lark_identity ADD COLUMN IF NOT EXISTS "lark_user_id" VARCHAR(128) NOT NULL DEFAULT '';
+ALTER TABLE plugin_linapro_employee_core_lark_identity ADD COLUMN IF NOT EXISTS "id_source" VARCHAR(16) NOT NULL DEFAULT 'own';
 
 COMMENT ON TABLE plugin_linapro_employee_core_lark_identity IS '飞书身份映射表：(lark_app_id, lark_open_id) → emp_id，归 linapro-employee-core 管理；解决同一自然人跨多个飞书企业各有一个 open_id 的问题';
 COMMENT ON COLUMN plugin_linapro_employee_core_lark_identity."lark_app_id" IS '飞书 App ID（cli_xxx）；标识该 open_id 所属的飞书企业';
@@ -80,6 +113,8 @@ COMMENT ON COLUMN plugin_linapro_employee_core_lark_identity."created_at" IS '�
 
 CREATE INDEX IF NOT EXISTS idx_plugin_linapro_employee_core_lark_identity_emp
     ON plugin_linapro_employee_core_lark_identity ("emp_id");
+-- 反查索引：考勤事件按 (lark_app_id, lark_user_id) 双键解析 emp_id，
+-- larkAppID 定位企业以避免跨企业 user_id 碰撞。仅对非空 user_id 建索引。
 CREATE INDEX IF NOT EXISTS idx_plugin_linapro_employee_core_lark_identity_user
     ON plugin_linapro_employee_core_lark_identity ("lark_app_id", "lark_user_id")
     WHERE "lark_user_id" <> '';

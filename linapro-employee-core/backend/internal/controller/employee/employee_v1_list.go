@@ -43,15 +43,18 @@ func (c *ControllerV1) List(ctx context.Context, req *v1.ListReq) (res *v1.ListR
 			appIDs = append(appIDs, ident.LarkAppID)
 		}
 		res.List = append(res.List, &v1.EmployeeItem{
-			EmpId:          row.EmpID,
-			Name:           row.Name,
-			MokaEmployeeNo: row.EmployeeNo,
-			TenantId:       row.TenantID,
-			TenantName:     names[row.TenantID],
-			Status:         row.Status,
-			LarkBound:      len(appIDs) > 0,
-			LarkAppIds:     appIDs,
-			UpdatedAt:      row.UpdatedAt,
+			EmpId:            row.EmpID,
+			Name:             row.Name,
+			MokaEmployeeNo:   row.EmployeeNo,
+			TenantId:         row.TenantID,
+			TenantName:       names[row.TenantID],
+			Status:           row.Status,
+			OnBoardingDate:   row.OnBoardingDate,
+			EndProbationDate: row.EndProbationDate,
+			LeaveDate:        row.LeaveDate,
+			LarkBound:        len(appIDs) > 0,
+			LarkAppIds:       appIDs,
+			UpdatedAt:        row.UpdatedAt,
 		})
 	}
 	return res, nil

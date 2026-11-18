@@ -27,9 +27,11 @@ type MokaEmployee struct {
 	// Department 是 Moka 下发的完整部门路径，形如
 	// "广州星嘉/公共部门/公共部门/总经办/CEO"。租户映射只取其顶层
 	// 段（第一个 "/" 之前），见 topLevelDept。
-	Department     string
-	OnBoardingDate string // 入职日期，格式 YYYY-MM-DD
-	Status         int    // 取值见 MokaStatusActive / MokaStatusDeparted
+	Department       string
+	OnBoardingDate   string // 入职日期，格式 YYYY-MM-DD
+	EndProbationDate string // 转正日期，格式 YYYY-MM-DD
+	LeaveDate        string // 离职日期，格式 YYYY-MM-DD；在职员工为空
+	Status           int    // 取值见 MokaStatusActive / MokaStatusDeparted
 }
 
 // topLevelDept 从 Moka 的完整部门路径中截取顶层部门名，即第一个 "/"
@@ -143,10 +145,14 @@ func (s *Syncer) RunFullSync(ctx context.Context, deptTenantMap map[string]int) 
 		}
 		// Departed 透传 Moka 在职状态：在职员工被恢复为在职（重新入职、误标离职纠正），
 		// 离职员工的状态改动仍交给 reconcileDeparted 的 MarkDeparted。
+		// 三个任职日期按 Moka 本轮值快照覆盖（空值即清空为 NULL）。
 		empID, err := s.employees.UpsertEmployee(ctx, tenantID, empcap.Profile{
-			Name:       me.Realname,
-			EmployeeNo: me.EmployeeNo,
-			Departed:   me.Status != MokaStatusActive,
+			Name:             me.Realname,
+			EmployeeNo:       me.EmployeeNo,
+			Departed:         me.Status != MokaStatusActive,
+			OnBoardingDate:   me.OnBoardingDate,
+			EndProbationDate: me.EndProbationDate,
+			LeaveDate:        me.LeaveDate,
 		})
 		if err != nil {
 			logger.Errorf(ctx, "员工目录同步: 写入员工失败 工号=%q: %v", me.EmployeeNo, err)

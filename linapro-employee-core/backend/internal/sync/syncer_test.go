@@ -65,6 +65,9 @@ type fakeEmpSvc struct {
 	userIDToEmp map[userIDKey]int64         // lark_identity 的 user_id 反查（仅 own）
 	nextID      int64
 	departed    []empKey
+	// leaveDates 记录每次 MarkDeparted 收到的离职日期，顺序与 departed 一致；
+	// 用于验证离职对账把 Moka 的 leave_date 传到了写入网关。
+	leaveDates []string
 	// 离职对账调用计数与故障注入：验证对账走一次批量回查而非逐条查询。
 	anyTenantGetCalls   int
 	anyTenantBatchCalls int
@@ -102,6 +105,10 @@ func (s *fakeEmpSvc) UpsertEmployee(_ context.Context, tenantID int, p empcap.Pr
 	k := noKey(tenantID, p.EmployeeNo)
 	if e, ok := s.rows[k]; ok {
 		e.Name = p.Name
+		// 与真实实现一致：三个任职日期按本轮快照覆盖（空值即清空）。
+		e.OnBoardingDate = p.OnBoardingDate
+		e.EndProbationDate = p.EndProbationDate
+		e.LeaveDate = p.LeaveDate
 		// 与真实实现一致：Moka 报在职时恢复在职，报离职时不改状态。
 		if !p.Departed {
 			e.Status = empcap.StatusActive
@@ -113,16 +120,27 @@ func (s *fakeEmpSvc) UpsertEmployee(_ context.Context, tenantID int, p empcap.Pr
 	if p.Departed {
 		status = empcap.StatusDeparted
 	}
-	e := &empcap.Employee{EmpID: s.nextID, TenantID: tenantID, EmployeeNo: p.EmployeeNo, Name: p.Name, Status: status}
+	e := &empcap.Employee{
+		EmpID:            s.nextID,
+		TenantID:         tenantID,
+		EmployeeNo:       p.EmployeeNo,
+		Name:             p.Name,
+		Status:           status,
+		OnBoardingDate:   p.OnBoardingDate,
+		EndProbationDate: p.EndProbationDate,
+		LeaveDate:        p.LeaveDate,
+	}
 	s.rows[k] = e
 	return s.nextID, nil
 }
 
-func (s *fakeEmpSvc) MarkDeparted(_ context.Context, tenantID int, empID int64) error {
+func (s *fakeEmpSvc) MarkDeparted(_ context.Context, tenantID int, empID int64, leaveDate string) error {
 	s.departed = append(s.departed, empKey{tenantID, empID})
+	s.leaveDates = append(s.leaveDates, leaveDate)
 	for _, e := range s.rows {
 		if e.TenantID == tenantID && e.EmpID == empID {
 			e.Status = empcap.StatusDeparted
+			e.LeaveDate = leaveDate
 		}
 	}
 	return nil
@@ -426,7 +444,7 @@ func TestRunFullSync_ReactivatesReturningEmployee(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err = svc.MarkDeparted(ctx, 1, id); err != nil {
+	if err = svc.MarkDeparted(ctx, 1, id, ""); err != nil {
 		t.Fatalf("seed departed: %v", err)
 	}
 
@@ -474,6 +492,76 @@ func TestRunFullSync_DepartedEmptyDept(t *testing.T) {
 	}
 }
 
+// TestRunFullSync_PassesEmploymentDates 验证三个任职日期从 Moka 记录透传到
+// empcap.Profile 并落库：入职、转正日期写入，离职日期在职时为空。
+func TestRunFullSync_PassesEmploymentDates(t *testing.T) {
+	ctx := context.Background()
+	svc := newFakeEmpSvc()
+	moka := &fakeMokaFetcher{employees: []MokaEmployee{
+		{
+			EmployeeNo:       "GZ000041",
+			Realname:         "Ivy",
+			Department:       "广州星嘉/公共部门",
+			Status:           MokaStatusActive,
+			OnBoardingDate:   "2021-03-01",
+			EndProbationDate: "2021-06-01",
+			LeaveDate:        "",
+		},
+	}}
+	if _, err := NewSyncer(svc, moka, nil).RunFullSync(ctx, map[string]int{"广州星嘉": 1}); err != nil {
+		t.Fatalf("RunFullSync: %v", err)
+	}
+	got, err := svc.GetByEmployeeNo(ctx, 1, "GZ000041")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.OnBoardingDate != "2021-03-01" {
+		t.Fatalf("want on-boarding 2021-03-01, got %q", got.OnBoardingDate)
+	}
+	if got.EndProbationDate != "2021-06-01" {
+		t.Fatalf("want probation end 2021-06-01, got %q", got.EndProbationDate)
+	}
+	if got.LeaveDate != "" {
+		t.Fatalf("want empty leave date for active employee, got %q", got.LeaveDate)
+	}
+}
+
+// TestRunFullSync_DepartedWritesLeaveDate 验证离职对账把 Moka 的离职日期传给
+// MarkDeparted：部门为空、只能靠对账兜底的离职员工也要落上离职日期。
+func TestRunFullSync_DepartedWritesLeaveDate(t *testing.T) {
+	ctx := context.Background()
+	svc := newFakeEmpSvc()
+	id, err := svc.UpsertEmployee(ctx, 5, empcap.Profile{Name: "Jack", EmployeeNo: "GZ000042"})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	moka := &fakeMokaFetcher{employees: []MokaEmployee{
+		{
+			EmployeeNo: "GZ000042",
+			Realname:   "Jack",
+			Department: "", // 部门为空：无法映射租户，走离职对账兜底
+			Status:     MokaStatusDeparted,
+			LeaveDate:  "2024-08-31",
+		},
+	}}
+	if _, err = NewSyncer(svc, moka, nil).RunFullSync(ctx, map[string]int{"广州星嘉": 1}); err != nil {
+		t.Fatalf("RunFullSync: %v", err)
+	}
+	if len(svc.leaveDates) != 1 || svc.leaveDates[0] != "2024-08-31" {
+		t.Fatalf("want MarkDeparted called with 2024-08-31, got %+v", svc.leaveDates)
+	}
+	got, err := svc.GetByID(ctx, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != empcap.StatusDeparted {
+		t.Fatalf("want departed, got %d", got.Status)
+	}
+	if got.LeaveDate != "2024-08-31" {
+		t.Fatalf("want leave date 2024-08-31, got %q", got.LeaveDate)
+	}
+}
+
 // TestRunFullSync_DepartedBatchLookup 验证离职对账按工号一次批量回查：
 // 多名离职员工只调一次 MapByEmployeeNosAnyTenant、不逐条调 GetByEmployeeNoAnyTenant；
 // 本地不存在的工号与已离职员工被跳过，只有在职→离职的员工计入 Departed。
@@ -491,7 +579,7 @@ func TestRunFullSync_DepartedBatchLookup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed C: %v", err)
 	}
-	if err = svc.MarkDeparted(ctx, 3, idC); err != nil {
+	if err = svc.MarkDeparted(ctx, 3, idC, ""); err != nil {
 		t.Fatalf("seed C departed: %v", err)
 	}
 	svc.departed = nil // 只统计本轮同步产生的标记

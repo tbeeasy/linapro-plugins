@@ -105,6 +105,23 @@ func LarkUserIDResolverByApp(ctx context.Context, larkAppID string) (LarkUserIDI
 	return svc.MapOwnLarkUserIDsByEmployeeNo(ctx, larkAppID)
 }
 
+// EmployeesByNamesAnyTenant 按姓名集合跨租户批量取员工行，供需要按姓名寻址的消费方
+// （如 linapro-lark-push 的姓名收件人）一次查完、在内存判定，避免逐条查询的 N+1。
+//
+// 取值语义原样透传 Service.MapByNamesAnyTenant：只看原值精确匹配（姓名归一由消费方在传入前
+// 完成）、每组按 EmpID 升序、不排除离职员工，同名判定与在职筛选由消费方负责——「重名算错误
+// 还是算可接受」是业务口径，不应由数据 owner 替消费方决定。
+//
+// 降级语义：员工服务未绑定返回「能力未就绪」错误（静默返回空映射会表现为「所有姓名都不存在」，
+// 掩盖装配缺陷）；批量查询失败原样上抛。
+func EmployeesByNamesAnyTenant(ctx context.Context, names []string) (map[string][]*Employee, error) {
+	svc := BoundEmployeeService()
+	if svc == nil {
+		return nil, ErrServiceUnbound
+	}
+	return svc.MapByNamesAnyTenant(ctx, names)
+}
+
 // BindTokenSecretProvider 装配拥有方插件的 JWT 密钥来源。
 func BindTokenSecretProvider(fn SecretProvider) {
 	bindMu.Lock()

@@ -3,14 +3,16 @@
 // 员工行由 Moka 同步写入、后台没有新增接口（见 design D25），因此 E2E 无法经 UI
 // 造数；这里直接向插件表插入带唯一工号/姓名的种子行，用例结束后按租户删除。
 // 只写 employee 与 lark_identity 两张表，不触碰同步任务的其他状态。
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 
-import { request, type APIRequestContext } from '@playwright/test';
+import { request, type APIRequestContext, type Page } from '@playwright/test';
 
 import { config, pluginApiPath } from '../../../../../../hack/tests/fixtures/config';
 import {
   execPgSQL,
   pgEscapeLiteral,
+  queryPgRows,
   queryPgScalar,
 } from '../../../../../../hack/tests/support/postgres';
 
@@ -33,6 +35,10 @@ export interface SeedEmployee {
   status: number;
   appId: string;
   openId: string;
+  /** 三个任职日期（YYYY-MM-DD），未传时为空（库中 NULL）。 */
+  onBoardingDate: string;
+  endProbationDate: string;
+  leaveDate: string;
 }
 
 /**
@@ -45,16 +51,25 @@ export function seedEmployee(options: {
   employeeNo: string;
   status?: number;
   withOwnIdentity?: boolean;
+  onBoardingDate?: string;
+  endProbationDate?: string;
+  leaveDate?: string;
 }): SeedEmployee {
   const employeeNo = pgEscapeLiteral(options.employeeNo);
   const name = pgEscapeLiteral(options.name);
   const status = options.status ?? 1;
+  // 任职日期为可空 DATE：未传时写 NULL，传值时按 SQL 日期字面量写入。
+  const dateSql = (value?: string) =>
+    value ? `'${pgEscapeLiteral(value)}'` : 'NULL';
   const empId = Number.parseInt(
     queryPgScalar(
-      `INSERT INTO ${employeeTable} ("tenant_id","name","moka_employee_no","status","sys_user_id","created_at","updated_at")
-       VALUES (${options.tenantId},'${name}','${employeeNo}',${status},0,now(),now())
+      `INSERT INTO ${employeeTable} ("tenant_id","name","moka_employee_no","status","sys_user_id","on_boarding_date","end_probation_date","leave_date","created_at","updated_at")
+       VALUES (${options.tenantId},'${name}','${employeeNo}',${status},0,${dateSql(options.onBoardingDate)},${dateSql(options.endProbationDate)},${dateSql(options.leaveDate)},now(),now())
        ON CONFLICT ("tenant_id","moka_employee_no") WHERE "deleted_at" IS NULL AND "moka_employee_no" <> ''
-       DO UPDATE SET "name" = EXCLUDED."name", "status" = EXCLUDED."status", "updated_at" = now()
+       DO UPDATE SET "name" = EXCLUDED."name", "status" = EXCLUDED."status",
+                     "on_boarding_date" = EXCLUDED."on_boarding_date",
+                     "end_probation_date" = EXCLUDED."end_probation_date",
+                     "leave_date" = EXCLUDED."leave_date", "updated_at" = now()
        RETURNING "id";`,
     ),
     10,
@@ -78,6 +93,9 @@ export function seedEmployee(options: {
     status,
     appId,
     openId,
+    onBoardingDate: options.onBoardingDate ?? '',
+    endProbationDate: options.endProbationDate ?? '',
+    leaveDate: options.leaveDate ?? '',
   };
 }
 
@@ -88,6 +106,34 @@ export function cleanupEmployees(tenantId: number) {
       WHERE "emp_id" IN (SELECT "id" FROM ${employeeTable} WHERE "tenant_id" = ${tenantId});
      DELETE FROM ${employeeTable} WHERE "tenant_id" = ${tenantId};`,
   );
+}
+
+/** 员工列表菜单的权限点键名。 */
+export const employeeMenuPerms = {
+  edit: 'linapro-employee-core:employee:edit',
+  list: 'linapro-employee-core:employee:list',
+  query: 'linapro-employee-core:employee:query',
+} as const;
+
+/** 通讯录管理菜单树在 sys_menu 中的键名。 */
+export const employeeMenuKeys = {
+  contacts: 'plugin:linapro-employee-core:contacts',
+  edit: 'plugin:linapro-employee-core:contacts:employees:edit',
+  employees: 'plugin:linapro-employee-core:contacts:employees',
+  query: 'plugin:linapro-employee-core:contacts:employees:detail',
+} as const;
+
+/** menuIDsByKey 把菜单键名解析成 sys_menu 主键，缺失即报错（防止静默跳过）。 */
+export function menuIDsByKey(keys: readonly string[]): number[] {
+  return keys.map((key) => {
+    const id = queryPgScalar(
+      `SELECT id FROM sys_menu WHERE menu_key = '${pgEscapeLiteral(key)}' AND deleted_at IS NULL LIMIT 1;`,
+    );
+    if (!id) {
+      throw new Error(`未找到菜单: ${key}（请确认插件已安装并同步菜单）`);
+    }
+    return Number.parseInt(id, 10);
+  });
 }
 
 /** newAdminApi 用管理端会话令牌建立 API 上下文（与 UI 同一身份与租户）。 */
@@ -103,6 +149,99 @@ export async function newAdminApi(storageStatePath: string): Promise<APIRequestC
     baseURL: config.backendBaseURL,
     extraHTTPHeaders: headers,
   });
+}
+
+/** createLimitedRole 建一个只授予指定菜单的测试角色，返回角色 ID。 */
+export async function createLimitedRole(
+  adminApi: APIRequestContext,
+  options: { menuIds: number[]; name: string; key: string },
+): Promise<number> {
+  // newAdminApi 的 baseURL 是后端根地址（插件路径 /x/<id>/api/v1/... 需要它），
+  // 宿主接口必须显式带上 /api/v1 前缀。
+  const response = await adminApi.post('/api/v1/role', {
+    data: {
+      dataScope: 1,
+      key: options.key,
+      menuIds: options.menuIds,
+      name: options.name,
+      remark: 'employee-core E2E 权限反向用例专用角色',
+      sort: 99,
+      status: 1,
+    },
+  });
+  if (!response.ok()) {
+    throw new Error(`创建角色失败: ${options.key}, status=${response.status()}`);
+  }
+  const payload = (await response.json()) as { data?: { id?: number } };
+  const id = payload?.data?.id;
+  if (!id) {
+    throw new Error(`创建角色未返回 ID: ${options.key}`);
+  }
+  return id;
+}
+
+/** createLimitedUser 建一个只挂指定角色的测试用户，返回用户 ID。 */
+export async function createLimitedUser(
+  adminApi: APIRequestContext,
+  options: { nickname: string; password: string; roleIds: number[]; username: string },
+): Promise<number> {
+  const response = await adminApi.post('/api/v1/user', {
+    data: {
+      nickname: options.nickname,
+      password: options.password,
+      roleIds: options.roleIds,
+      status: 1,
+      username: options.username,
+    },
+  });
+  if (!response.ok()) {
+    throw new Error(`创建用户失败: ${options.username}, status=${response.status()}`);
+  }
+  const payload = (await response.json()) as { data?: { id?: number } };
+  const id = payload?.data?.id;
+  if (!id) {
+    throw new Error(`创建用户未返回 ID: ${options.username}`);
+  }
+  return id;
+}
+
+/** cleanupRoleAndUser 按用户名/角色键删除测试用户与角色，含授权关系。 */
+export function cleanupRoleAndUser(username: string, roleKey: string) {
+  const escapedUser = pgEscapeLiteral(username);
+  const escapedRole = pgEscapeLiteral(roleKey);
+  execPgSQL(
+    `DELETE FROM sys_user_role WHERE user_id IN (SELECT id FROM sys_user WHERE username = '${escapedUser}');
+     DELETE FROM sys_user WHERE username = '${escapedUser}';
+     DELETE FROM sys_role_menu WHERE role_id IN (SELECT id FROM sys_role WHERE "key" = '${escapedRole}');
+     DELETE FROM sys_role WHERE "key" = '${escapedRole}';`,
+  );
+}
+
+/**
+ * captureScreenshot 按 .agents/rules/testing.md 存截图：
+ * 项目根 temp/<日期>/<时:分:秒>-<描述>.png。
+ */
+export async function captureScreenshot(page: Page, description: string) {
+  const stamp = new Date();
+  const datePart = [
+    stamp.getFullYear(),
+    String(stamp.getMonth() + 1).padStart(2, '0'),
+    String(stamp.getDate()).padStart(2, '0'),
+  ].join('');
+  const timePart = [
+    String(stamp.getHours()).padStart(2, '0'),
+    String(stamp.getMinutes()).padStart(2, '0'),
+    String(stamp.getSeconds()).padStart(2, '0'),
+  ].join('');
+  const dir = path.resolve(process.cwd(), '../..', 'temp', datePart);
+  mkdirSync(dir, { recursive: true });
+  await page.screenshot({ path: path.join(dir, `${timePart}-${description}.png`) });
+}
+
+/** tableRows 读取某张表在给定条件下的行数（用于断言清理是否干净）。 */
+export function countRows(sql: string): number {
+  const rows = queryPgRows(sql);
+  return rows.length === 0 ? 0 : Number.parseInt(rows[0]!, 10);
 }
 
 /** adminAccessToken 从管理端 storageState 里按值形状找出 JWT，不猜键名。 */

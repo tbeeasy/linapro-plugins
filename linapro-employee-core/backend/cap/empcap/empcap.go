@@ -44,6 +44,10 @@ type Department struct {
 // Employee 是查询返回的读模型。飞书身份已不再是员工行的一部分；
 // 它位于 lark_identity 映射表中（一个人可能跨多个飞书企业），
 // 因此该模型不携带 open_id。
+//
+// 三个任职日期均为 YYYY-MM-DD 字符串，空字符串表示 Moka 未提供（库中为 NULL）。
+// 直接向前端与消费方暴露字符串而非 time.Time，是因为日期无时区语义，
+// 时间和序列化在两处都容易引入偏移。
 type Employee struct {
 	EmpID       int64
 	TenantID    int
@@ -51,6 +55,12 @@ type Employee struct {
 	Name        string
 	Status      int
 	Departments []Department
+	// OnBoardingDate 是入职日期（YYYY-MM-DD），Moka 未提供时为空字符串。
+	OnBoardingDate string
+	// EndProbationDate 是转正日期（YYYY-MM-DD），Moka 未提供时为空字符串。
+	EndProbationDate string
+	// LeaveDate 是离职日期（YYYY-MM-DD），在职或 Moka 未提供时为空字符串。
+	LeaveDate string
 }
 
 // Active 报告该员工当前是否在职。
@@ -68,6 +78,15 @@ type Profile struct {
 	// 已存在的员工恢复为在职；为 true 时不改动已存在员工的状态（置离职统一走
 	// MarkDeparted），新建行则直接落离职。
 	Departed bool
+	// OnBoardingDate 是入职日期，格式 YYYY-MM-DD；空字符串表示 Moka 未提供。
+	OnBoardingDate string
+	// EndProbationDate 是转正日期，格式 YYYY-MM-DD；空字符串表示 Moka 未提供。
+	EndProbationDate string
+	// LeaveDate 是离职日期，格式 YYYY-MM-DD；在职或 Moka 未提供时为空字符串。
+	LeaveDate string
+	// 注意：上面三个日期是**每轮快照覆盖**语义，与 Departments 的「空即不更新」相反。
+	// Moka 明确提供这三个日期，空值本身就是权威事实；若沿用「空即不更新」，
+	// 员工重新入职后旧的 leave_date 将永远留在行上，产生「在职 + 有离职日期」的矛盾行。
 }
 
 // Service 是拥有方插件实现、其他插件消费的宽契约。拥有方是员工表的
@@ -81,8 +100,13 @@ type Service interface {
 	// 员工的状态（置离职由 MarkDeparted 负责），新建行直接落离职。
 	UpsertEmployee(ctx context.Context, tenantID int, profile Profile) (empID int64, err error)
 
-	// MarkDeparted 将员工状态置为离职。
-	MarkDeparted(ctx context.Context, tenantID int, empID int64) error
+	// MarkDeparted 将员工状态置为离职，并一并写入离职日期。
+	// leaveDate 格式 YYYY-MM-DD，为空表示 Moka 未提供离职日期（落 NULL）。
+	//
+	// 离职日期有两个写入点，这是其一：部门可映射的离职员工由 UpsertEmployee
+	// 快照覆盖三个日期；部门为空、由离职对账按工号兜底标记的员工只走本方法，
+	// 因此状态与日期 MUST 在同一条更新里写入，避免两者不一致。
+	MarkDeparted(ctx context.Context, tenantID int, empID int64, leaveDate string) error
 
 	// GetByID 按内部 EmpID 返回一名员工（含部门）。
 	GetByID(ctx context.Context, empID int64) (*Employee, error)
@@ -126,8 +150,11 @@ type Service interface {
 	// 空集合直接返回空 map；未命中的姓名不入 map；不排除离职员工——在职判定由消费方按 Status 决定。
 	MapByNamesAnyTenant(ctx context.Context, names []string) (map[string][]*Employee, error)
 
-	// GetByName 按 (tenantID, 姓名) 返回一名员工。每个租户内姓名唯一
-	// 是业务不变式；调用方依赖这一点。
+	// GetByName 按 (tenantID, 姓名) 返回一名员工。无匹配时返回 ErrEmployeeNotFound。
+	//
+	// 姓名在租户内并不唯一（同名员工合法存在），同名时按 EmpID 升序取第一行以保证
+	// 结果稳定；需要区分重名的消费方必须改用 MapByNamesAnyTenant 并自行判重，
+	// 不得依赖本方法返回「唯一那个人」。
 	GetByName(ctx context.Context, tenantID int, name string) (*Employee, error)
 
 	// ListActiveByTenant 返回某租户下所有在职（status=1）员工。

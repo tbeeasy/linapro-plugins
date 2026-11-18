@@ -51,6 +51,11 @@ type AdminRow struct {
 	SysUserID  int
 	CreatedAt  *int64
 	UpdatedAt  *int64
+	// 三个任职日期（YYYY-MM-DD），空字符串表示 Moka 未提供。
+	// 按 design D26 只在详情接口透出，列表接口不返回（保持窄投影）。
+	OnBoardingDate   string
+	EndProbationDate string
+	LeaveDate        string
 	// Identities 只含 id_source='own' 的身份；列表不展示 assoc。
 	Identities []LarkIdentityView
 }
@@ -296,15 +301,18 @@ func (s *Service) adminRows(ctx context.Context, rows []*entity.Employee, idSour
 	out := make([]*AdminRow, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, &AdminRow{
-			EmpID:      r.Id,
-			TenantID:   r.TenantId,
-			Name:       r.Name,
-			EmployeeNo: r.MokaEmployeeNo,
-			Status:     r.Status,
-			SysUserID:  r.SysUserId,
-			CreatedAt:  unixMilli(r.CreatedAt),
-			UpdatedAt:  unixMilli(r.UpdatedAt),
-			Identities: byEmp[r.Id],
+			EmpID:            r.Id,
+			TenantID:         r.TenantId,
+			Name:             r.Name,
+			EmployeeNo:       r.MokaEmployeeNo,
+			Status:           r.Status,
+			SysUserID:        r.SysUserId,
+			CreatedAt:        unixMilli(r.CreatedAt),
+			UpdatedAt:        unixMilli(r.UpdatedAt),
+			OnBoardingDate:   formatDate(r.OnBoardingDate),
+			EndProbationDate: formatDate(r.EndProbationDate),
+			LeaveDate:        formatDate(r.LeaveDate),
+			Identities:       byEmp[r.Id],
 		})
 	}
 	return out, nil

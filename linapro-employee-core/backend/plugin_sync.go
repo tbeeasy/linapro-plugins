@@ -42,11 +42,13 @@ func (a *mokaFetcherAdapter) ListAllEmployees(ctx context.Context) ([]sync.MokaE
 	out := make([]sync.MokaEmployee, 0, len(hcmEmployees))
 	for _, e := range hcmEmployees {
 		out = append(out, sync.MokaEmployee{
-			EmployeeNo:     e.EmployeeNo,
-			Realname:       e.Realname,
-			Department:     e.Department,
-			OnBoardingDate: e.OnBoardingDate,
-			Status:         e.Status,
+			EmployeeNo:       e.EmployeeNo,
+			Realname:         e.Realname,
+			Department:       e.Department,
+			OnBoardingDate:   e.OnBoardingDate,
+			EndProbationDate: e.EndProbationDate,
+			LeaveDate:        e.LeaveDate,
+			Status:           e.Status,
 		})
 	}
 	return out, nil
@@ -75,7 +77,7 @@ func newMokaFetcher(ctx context.Context, hc hostconfigcap.Service) (sync.MokaFet
 	for _, r := range reads {
 		v, err := hc.String(ctx, r.key, r.def)
 		if err != nil {
-			return nil, gerror.Wrapf(err, "employee directory sync: read config %s failed", r.key)
+			return nil, gerror.Wrapf(err, "员工目录同步: 读取配置 %s 失败", r.key)
 		}
 		*r.dst = v
 	}

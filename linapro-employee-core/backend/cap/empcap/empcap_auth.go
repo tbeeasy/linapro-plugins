@@ -57,6 +57,9 @@ func EmpAuth() ghttp.HandlerFunc {
 		}
 
 		r.SetCtx(WithEmpContext(ctx, empCtx))
+		// 写入调用方标识供接口请求日志插件读取（约定见 empcap_caller.go）。
+		// 鉴权路径上已经 GetByID 拿到员工行，姓名与工号零额外查询。
+		SetCaller(r, empCtx, emp.Name, emp.EmployeeNo)
 		r.Middleware.Next()
 	}
 }

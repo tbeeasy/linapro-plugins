@@ -1,8 +1,13 @@
 -- ------------------------------------------------------------
 -- 001 linapro-employee-core 卸载
--- 用途：插件卸载时清理插件表。
+-- 用途：本文件**故意不含任何 DDL/DML**——卸载插件不删除员工数据。
 -- ------------------------------------------------------------
-
-DROP TABLE IF EXISTS plugin_linapro_employee_core_lark_identity;
-DROP TABLE IF EXISTS plugin_linapro_employee_core_employee_dept;
-DROP TABLE IF EXISTS plugin_linapro_employee_core_employee;
+--
+-- 员工、部门关系、飞书身份三张表被考勤、问卷、360 测评等业务插件以内部 EmpID 引用，
+-- 删表会让这些业务数据失去关联且无法从 Moka 同步重建出同样的 EmpID。
+--   - 不写 DROP TABLE：即使卸载时勾选「清理存储数据」，三张表及数据仍保留。
+--   - 不写 DROP SEQUENCE：序列随表保留，重装后 EmpID 继续递增，不会与历史记录撞号。
+--   - 不写菜单清理：宿主卸载时已按 `plugin:<plugin-id>:%` 前缀删除 sys_menu 与 sys_role_menu。
+--   - 重新安装时 001 安装脚本全部为 IF [NOT] EXISTS 幂等语句，直接复用已有表与数据。
+--
+-- 若确需删除这些表，只能人工执行 DROP TABLE，且应先自行备份并确认无业务插件引用。

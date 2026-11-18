@@ -16,6 +16,12 @@ export interface EmployeeItem {
   tenantName: string;
   /** 1=在职 0=离职 */
   status: number;
+  /** 入职日期（YYYY-MM-DD），Moka 未提供时为空字符串 */
+  onBoardingDate: string;
+  /** 转正日期（YYYY-MM-DD），Moka 未提供时为空字符串 */
+  endProbationDate: string;
+  /** 离职日期（YYYY-MM-DD），在职或 Moka 未提供时为空字符串 */
+  leaveDate: string;
   larkBound: boolean;
   larkAppIds: string[];
   updatedAt: null | number;
@@ -41,7 +47,7 @@ export interface LarkIdentityItem {
   createdAt: null | number;
 }
 
-/** 详情：列表字段 + 关联后台账号 + 部门 + 全部飞书身份。 */
+/** 详情：列表字段 + 关联后台账号 + 部门 + 任职日期 + 全部飞书身份。 */
 export interface EmployeeDetail {
   empId: number;
   name: string;
@@ -52,6 +58,12 @@ export interface EmployeeDetail {
   sysUserId: number;
   sysUserName: string;
   sysUserNickname: string;
+  /** 入职日期（YYYY-MM-DD），Moka 未提供时为空字符串 */
+  onBoardingDate: string;
+  /** 转正日期（YYYY-MM-DD），Moka 未提供时为空字符串 */
+  endProbationDate: string;
+  /** 离职日期（YYYY-MM-DD），在职或 Moka 未提供时为空字符串 */
+  leaveDate: string;
   createdAt: null | number;
   updatedAt: null | number;
   departmentIds: string[];
@@ -106,10 +118,13 @@ export async function unbindLarkIdentity(
 }
 
 export async function setEmployeeSysUser(empId: number, sysUserId: number) {
-  return requestClient.put(employeeApi(`contacts/employees/${empId}/sys-user`), {
-    empId,
-    sysUserId,
-  });
+  return requestClient.put(
+    employeeApi(`contacts/employees/${empId}/sys-user`),
+    {
+      empId,
+      sysUserId,
+    },
+  );
 }
 
 export async function listLarkApps() {

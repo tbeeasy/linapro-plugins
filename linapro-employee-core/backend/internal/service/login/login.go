@@ -1,7 +1,8 @@
 // Package login 编排员工飞书登录：按 lark_app_id 解析每应用凭据 →
-// 用 code 换 open_id → 通过 lark_identity 映射解析员工 → 签发绑定该员工
-// 租户的员工 JWT。它绝不自动开通：未注册的 (lark_app_id, open_id) 会被拒绝，
-// 已离职员工同样被拒绝。
+// 用 code 换身份 → 通过 lark_identity 映射解析员工 → 签发绑定该员工
+// 租户的员工 JWT。身份应用按 (lark_app_id, open_id) 解析；免登应用（配置了
+// identity_app_id）按 (identity_app_id, user_id) 解析。它绝不自动开通：未注册的
+// 身份会被拒绝，已离职员工同样被拒绝。
 // 飞书 provider 和凭据加载器都被注入，使编排逻辑可用 fake 单元测试，
 // 真实的 SDK/网络只保留在生产装配中。
 package login
@@ -60,11 +61,8 @@ func (s *Service) Login(ctx context.Context, larkAppID, code string) (*Result, e
 	if err != nil {
 		return nil, err
 	}
-	if identity.OpenID == "" {
-		return nil, empcap.ErrUnauthorized
-	}
 
-	empID, err := s.employees.ResolveEmpIDByLarkIdentity(ctx, larkAppID, identity.OpenID)
+	empID, err := s.resolveEmpID(ctx, cred, identity)
 	if err != nil {
 		return nil, err
 	}
@@ -89,4 +87,22 @@ func (s *Service) Login(ctx context.Context, larkAppID, code string) (*Result, e
 		Name:       emp.Name,
 		EmployeeNo: emp.EmployeeNo,
 	}, nil
+}
+
+// resolveEmpID 按应用类型把换票身份解析为 EmpID：
+//   - 身份应用（cred.IdentityAppID 为空）：按 (本应用, open_id) 查 lark_identity，open_id 空即拒；
+//   - 免登应用：lark_identity 只按身份应用写入，免登应用的 open_id 查不到，改按
+//     (identity_app_id, user_id) 查——user_id 在同一企业内跨应用一致；user_id 空即拒
+//     （免登应用未开通「获取用户 user ID」权限时就会如此）。
+func (s *Service) resolveEmpID(ctx context.Context, cred lark.Credential, identity lark.LoginIdentity) (int64, error) {
+	if cred.IdentityAppID == "" {
+		if identity.OpenID == "" {
+			return 0, empcap.ErrUnauthorized
+		}
+		return s.employees.ResolveEmpIDByLarkIdentity(ctx, cred.AppID, identity.OpenID)
+	}
+	if identity.UserID == "" {
+		return 0, empcap.ErrUnauthorized
+	}
+	return s.employees.ResolveEmpIDByLarkUserID(ctx, cred.IdentityAppID, identity.UserID)
 }

@@ -24,3 +24,7 @@ gfcli:
           "timestamp with time zone":
             type: "*time.Time"
             import: time
+          # 可空 DATE 列（入职/转正/离职日期）必须用指针，否则 NULL 会退化成零时刻
+          date:
+            type: "*time.Time"
+            import: time

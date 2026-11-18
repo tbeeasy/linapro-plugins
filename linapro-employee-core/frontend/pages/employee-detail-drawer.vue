@@ -8,7 +8,7 @@ import type {
   LarkAppOption,
   LarkIdentityItem,
   SysUserOption,
-} from "../employee-client";
+} from "./employee-client";
 
 import { computed, ref } from "vue";
 
@@ -38,7 +38,7 @@ import {
   listSysUserOptions,
   setEmployeeSysUser,
   unbindLarkIdentity,
-} from "../employee-client";
+} from "./employee-client";
 
 const emit = defineEmits<{ reload: [] }>();
 
@@ -222,6 +222,15 @@ async function handleUnbind(record: LarkIdentityItem) {
             <Tag :color="detail.status === 1 ? 'green' : 'default'">
               {{ detail.status === 1 ? "在职" : "离职" }}
             </Tag>
+          </DescriptionsItem>
+          <DescriptionsItem label="入职日期">
+            {{ detail.onBoardingDate || "—" }}
+          </DescriptionsItem>
+          <DescriptionsItem label="转正日期">
+            {{ detail.endProbationDate || "—" }}
+          </DescriptionsItem>
+          <DescriptionsItem label="离职日期">
+            {{ detail.leaveDate || "—" }}
           </DescriptionsItem>
           <DescriptionsItem label="部门">
             {{

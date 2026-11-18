@@ -5,7 +5,7 @@ id: linapro-employee-core
 name: Employee Identity - Core
 
 # 插件语义化版本号，当前示例统一使用带 `v` 前缀的写法。
-version: v0.1.1
+version: v0.2.0
 
 # 插件类型枚举。可选值：`source` 表示随宿主源码编译交付；`dynamic` 表示作为运行时动态插件产物加载。
 type: source
@@ -24,7 +24,7 @@ supports_multi_tenant: false
 default_install_mode: global
 
 # 插件说明，概述插件的能力边界。
-description: Provides Lark-authenticated employee identity, per-tenant login, and the EmpAuth session seam shared by attendance and survey plugins. Business data references the internal EmpID, not the Lark open_id.
+description: 提供经飞书认证的员工身份、按租户登录，以及考勤与问卷插件共享的 EmpAuth 会话接缝。业务数据引用内部 EmpID，而非飞书 open_id。
 
 # 插件作者或归属团队。
 author: linapro

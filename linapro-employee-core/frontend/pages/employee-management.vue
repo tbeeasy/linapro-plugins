@@ -10,7 +10,7 @@ export const pluginPageMeta = {
 <script setup lang="ts">
 import type { EmployeeItem } from "./employee-client";
 
-import { onMounted, ref } from "vue";
+import { onMounted } from "vue";
 
 import { useAccess } from "@vben/access";
 import { useVbenDrawer } from "@vben/common-ui";
@@ -20,17 +20,16 @@ import { Space, Tag } from "ant-design-vue";
 import { platformTenantList } from "#/api/platform/tenant";
 import { useVbenVxeGrid } from "#/adapter/vxe-table";
 import { Page } from "#/plugins/dynamic";
-import { formatTimestamp } from "#/utils/time";
 
+import { buildColumns, buildQuerySchema } from "./data";
 import { listEmployees } from "./employee-client";
-import EmployeeDetailDrawer from "./components/employee-detail-drawer.vue";
+import EmployeeDetailDrawer from "./employee-detail-drawer.vue";
 
 const accessCodes = {
   query: "linapro-employee-core:employee:query",
 } as const;
 
 const { hasAccessByCodes } = useAccess();
-const tenantOptions = ref<{ label: string; value: number }[]>([]);
 
 const [DetailDrawer, detailDrawerApi] = useVbenDrawer({
   connectedComponent: EmployeeDetailDrawer,
@@ -38,42 +37,7 @@ const [DetailDrawer, detailDrawerApi] = useVbenDrawer({
 
 const [Grid, gridApi] = useVbenVxeGrid({
   formOptions: {
-    schema: [
-      {
-        component: "Input",
-        fieldName: "keyword",
-        label: "姓名/工号",
-        componentProps: { placeholder: "姓名或工号" },
-      },
-      {
-        component: "Select",
-        fieldName: "tenantId",
-        label: "所属租户",
-        componentProps: () => ({ options: tenantOptions.value }),
-      },
-      {
-        component: "Select",
-        fieldName: "status",
-        label: "在职状态",
-        componentProps: {
-          options: [
-            { label: "在职", value: 1 },
-            { label: "离职", value: 0 },
-          ],
-        },
-      },
-      {
-        component: "Select",
-        fieldName: "larkBound",
-        label: "飞书绑定",
-        componentProps: {
-          options: [
-            { label: "已绑定", value: true },
-            { label: "未绑定", value: false },
-          ],
-        },
-      },
-    ],
+    schema: buildQuerySchema(),
     commonConfig: {
       labelWidth: 80,
       componentProps: { allowClear: true },
@@ -81,47 +45,7 @@ const [Grid, gridApi] = useVbenVxeGrid({
     wrapperClass: "grid-cols-1 md:grid-cols-2 lg:grid-cols-4",
   },
   gridOptions: {
-    columns: [
-      { field: "empId", title: "EmpID", width: 100 },
-      { field: "name", minWidth: 140, title: "姓名" },
-      {
-        field: "mokaEmployeeNo",
-        formatter: ({ cellValue }) => cellValue || "—",
-        minWidth: 140,
-        title: "工号",
-      },
-      {
-        field: "tenantName",
-        formatter: ({ cellValue, row }) => cellValue || `#${row.tenantId}`,
-        minWidth: 140,
-        title: "所属租户",
-      },
-      {
-        field: "status",
-        slots: { default: "status" },
-        title: "在职状态",
-        width: 110,
-      },
-      {
-        field: "larkBound",
-        slots: { default: "larkBound" },
-        title: "飞书绑定",
-        width: 140,
-      },
-      {
-        field: "updatedAt",
-        formatter: ({ cellValue }) => formatTimestamp(cellValue),
-        title: "更新时间",
-        width: 180,
-      },
-      {
-        field: "action",
-        fixed: "right",
-        slots: { default: "action" },
-        title: "操作",
-        width: 100,
-      },
-    ],
+    columns: buildColumns(),
     height: "auto",
     keepSource: true,
     pagerConfig: {},
@@ -146,15 +70,19 @@ const [Grid, gridApi] = useVbenVxeGrid({
 
 onMounted(async () => {
   // 租户下拉是附加筛选：取不到时留空，不影响列表本身。
+  let options: { label: string; value: number }[] = [];
   try {
     const { items } = await platformTenantList({ pageNum: 1, pageSize: 100 });
-    tenantOptions.value = items.map((tenant) => ({
+    options = items.map((tenant) => ({
       label: tenant.name,
       value: tenant.id,
     }));
   } catch {
-    tenantOptions.value = [];
+    // 留空即可，查询表单照常可用。
   }
+  gridApi.formApi.updateSchema([
+    { fieldName: "tenantId", componentProps: { options } },
+  ]);
 });
 
 function can(code: string) {

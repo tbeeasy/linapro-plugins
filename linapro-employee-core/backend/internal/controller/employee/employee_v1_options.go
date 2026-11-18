@@ -60,8 +60,14 @@ func (c *ControllerV1) ListSysUserOptions(ctx context.Context, req *v1.ListSysUs
 		if u == nil {
 			continue
 		}
+		// 宿主用户 id 非数字时跳过该候选：Id 落到前端再回传会变成 0，
+		// 而 sysUserId=0 的语义是「取消关联」，静默归零会把关联清空。
+		id, ok := userIDToInt(u.ID)
+		if !ok {
+			continue
+		}
 		res.List = append(res.List, &v1.SysUserOption{
-			Id:       userIDToInt(u.ID),
+			Id:       id,
 			Username: u.Username,
 			Nickname: u.Nickname,
 		})

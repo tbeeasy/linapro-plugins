@@ -21,28 +21,34 @@ type EmployeeDao struct {
 
 // EmployeeColumns 定义并存储表 plugin_linapro_employee_core_employee 的列名。
 type EmployeeColumns struct {
-	Id             string // 内部 EmpID：与身份提供方无关的代理主键，所有业务数据引用此值
-	TenantId       string // 所属租户；同一自然人在两个租户中是两条记录
-	Name           string // 员工姓名；Moka 为权威来源，登录时不覆盖
-	MokaEmployeeNo string // Moka HR 系统工号（如 GZ001198）；同租户内非空值唯一，是员工行存在的稳定锚点；未接入 Moka 时为空字符串
-	Status         string // 在职状态：1=在职，0=离职；EmpAuth 每次请求查询此字段以实时拦截离职员工
-	SysUserId      string // 可选关联：该员工同时是后台管理员时回填对应 sys_user.id；否则为 0
-	CreatedAt      string // 创建时间
-	UpdatedAt      string // 更新时间
-	DeletedAt      string // 软删除时间；存活行为 NULL
+	Id               string // 内部 EmpID：与身份提供方无关的代理主键，所有业务数据引用此值
+	TenantId         string // 所属租户；同一自然人在两个租户中是两条记录
+	Name             string // 员工姓名；Moka 为权威来源，登录时不覆盖
+	MokaEmployeeNo   string // Moka HR 系统工号（如 GZ001198）；同租户内非空值唯一，是员工行存在的稳定锚点；未接入 Moka 时为空字符串
+	Status           string // 在职状态：1=在职，0=离职；EmpAuth 每次请求查询此字段以实时拦截离职员工
+	SysUserId        string // 可选关联：该员工同时是后台管理员时回填对应 sys_user.id；否则为 0
+	CreatedAt        string // 创建时间
+	UpdatedAt        string // 更新时间
+	DeletedAt        string // 软删除时间；存活行为 NULL
+	OnBoardingDate   string // 入职日期（Moka on_boarding_date）；Moka 未提供时为 NULL，每轮同步快照覆盖
+	EndProbationDate string // 转正日期（Moka end_probation_date）；Moka 未提供时为 NULL，每轮同步快照覆盖
+	LeaveDate        string // 离职日期（Moka leave_date）；在职或 Moka 未提供时为 NULL，每轮同步快照覆盖
 }
 
 // employeeColumns 保存表 plugin_linapro_employee_core_employee 的列名。
 var employeeColumns = EmployeeColumns{
-	Id:             "id",
-	TenantId:       "tenant_id",
-	Name:           "name",
-	MokaEmployeeNo: "moka_employee_no",
-	Status:         "status",
-	SysUserId:      "sys_user_id",
-	CreatedAt:      "created_at",
-	UpdatedAt:      "updated_at",
-	DeletedAt:      "deleted_at",
+	Id:               "id",
+	TenantId:         "tenant_id",
+	Name:             "name",
+	MokaEmployeeNo:   "moka_employee_no",
+	Status:           "status",
+	SysUserId:        "sys_user_id",
+	CreatedAt:        "created_at",
+	UpdatedAt:        "updated_at",
+	DeletedAt:        "deleted_at",
+	OnBoardingDate:   "on_boarding_date",
+	EndProbationDate: "end_probation_date",
+	LeaveDate:        "leave_date",
 }
 
 // NewEmployeeDao 创建并返回一个新的 DAO 对象，用于表数据访问。

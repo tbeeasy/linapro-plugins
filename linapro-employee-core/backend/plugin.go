@@ -161,7 +161,7 @@ func registerSyncJob(ctx context.Context, registrar pluginhost.JobsRegistrar) er
 	hc := services.HostConfig()
 	enabled, err := hc.Bool(ctx, syncEnabledKey, true)
 	if err != nil {
-		return gerror.Wrapf(err, "linapro-employee-core: read config %s failed", syncEnabledKey)
+		return gerror.Wrapf(err, "linapro-employee-core: 读取配置 %s 失败", syncEnabledKey)
 	}
 	// 开关关闭时不声明任务：宿主会把未声明的 builtin 任务行连同历史日志剪除，
 	// 本地面板也就看不到这个任务（不是「已禁用」，而是不存在）。
@@ -172,12 +172,12 @@ func registerSyncJob(ctx context.Context, registrar pluginhost.JobsRegistrar) er
 
 	intervalMin, err := hc.Int(ctx, syncIntervalKey, syncIntervalMinutes)
 	if err != nil {
-		return gerror.Wrapf(err, "linapro-employee-core: read config %s failed", syncIntervalKey)
+		return gerror.Wrapf(err, "linapro-employee-core: 读取配置 %s 失败", syncIntervalKey)
 	}
 	if intervalMin <= 0 {
 		intervalMin = syncIntervalMinutes
 	}
-	pattern := fmt.Sprintf("0 %d * * * 0", intervalMin)
+	pattern := fmt.Sprintf("0 %d * * * *", intervalMin)
 
 	return registrar.AddWithMetadata(
 		ctx,

@@ -23,7 +23,7 @@ func (c *ControllerV1) BindLarkIdentity(ctx context.Context, req *v1.BindLarkIde
 		return nil, err
 	}
 	if c.contactClient == nil {
-		return nil, gerror.New("linapro-employee-core: lark contact client not wired")
+		return nil, gerror.New("linapro-employee-core: 飞书联系人客户端未注入")
 	}
 	user, err := c.contactClient(cred.AppID, cred.AppSecret).GetUser(ctx, req.OpenId)
 	if err != nil {

@@ -15,17 +15,20 @@ func (c *ControllerV1) Detail(ctx context.Context, req *v1.DetailReq) (res *v1.D
 	}
 
 	res = &v1.DetailRes{
-		EmpId:          detail.EmpID,
-		Name:           detail.Name,
-		MokaEmployeeNo: detail.EmployeeNo,
-		TenantId:       detail.TenantID,
-		TenantName:     c.tenantNames(ctx, []int{detail.TenantID})[detail.TenantID],
-		Status:         detail.Status,
-		SysUserId:      detail.SysUserID,
-		CreatedAt:      detail.CreatedAt,
-		UpdatedAt:      detail.UpdatedAt,
-		DepartmentIds:  make([]string, 0, len(detail.Departments)),
-		LarkIdentities: make([]*v1.LarkIdentityItem, 0, len(detail.Identities)),
+		EmpId:            detail.EmpID,
+		Name:             detail.Name,
+		MokaEmployeeNo:   detail.EmployeeNo,
+		TenantId:         detail.TenantID,
+		TenantName:       c.tenantNames(ctx, []int{detail.TenantID})[detail.TenantID],
+		Status:           detail.Status,
+		SysUserId:        detail.SysUserID,
+		OnBoardingDate:   detail.OnBoardingDate,
+		EndProbationDate: detail.EndProbationDate,
+		LeaveDate:        detail.LeaveDate,
+		CreatedAt:        detail.CreatedAt,
+		UpdatedAt:        detail.UpdatedAt,
+		DepartmentIds:    make([]string, 0, len(detail.Departments)),
+		LarkIdentities:   make([]*v1.LarkIdentityItem, 0, len(detail.Identities)),
 	}
 	for _, d := range detail.Departments {
 		res.DepartmentIds = append(res.DepartmentIds, d.LarkDepartmentID)
@@ -45,9 +48,6 @@ func (c *ControllerV1) Detail(ctx context.Context, req *v1.DetailReq) (res *v1.D
 
 	// 关联后台账号的名称是展示用附加信息：账号已删除或用户能力不可用时留空，
 	// 不因它取不到而让详情整体失败。
-	if name, nickname := c.sysUserName(ctx, detail.SysUserID); true {
-		res.SysUserName = name
-		res.SysUserNickname = nickname
-	}
+	res.SysUserName, res.SysUserNickname = c.sysUserName(ctx, detail.SysUserID)
 	return res, nil
 }
