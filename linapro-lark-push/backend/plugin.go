@@ -17,6 +17,7 @@ import (
 
 	apikeycontroller "lina-plugin-linapro-lark-push/backend/internal/controller/apikey"
 	pushcontroller "lina-plugin-linapro-lark-push/backend/internal/controller/push"
+	"lina-plugin-linapro-lark-push/backend/internal/middleware/bindlog"
 	"lina-plugin-linapro-lark-push/backend/internal/middleware/bodylimit"
 	"lina-plugin-linapro-lark-push/backend/internal/middleware/signature"
 	"lina-plugin-linapro-lark-push/backend/internal/service/alert"
@@ -137,11 +138,12 @@ func registerRoutes(ctx context.Context, registrar pluginhost.HTTPRegistrar) err
 			group.Bind(apiKeyController)
 		})
 		group.Group("/open/v1", func(group pluginhost.RouteGroup) {
-			// 对外接口：只挂「上下文 / 统一响应 / 请求体上限 / 自建 HMAC 签名 / 按路由请求体上限」。
-			// 刻意不挂 Auth/Tenancy/Permission：调用方是外部系统，没有宿主会话。
+			// 对外接口：只挂「上下文 / 统一响应 / 请求体上限 / 自建 HMAC 签名 / 按路由请求体上限 /
+			// 绑定失败日志」。刻意不挂 Auth/Tenancy/Permission：调用方是外部系统，没有宿主会话。
 			// 响应体一律由宿主 HandlerResponse 包装为 code / message / data / errorCode（FB-12），
 			// 签名中间件与处理器只返回错误或数据，不自行写 JSON。
 			// 签名不读请求体；按路由上限（文本 256 KB、文件 31 MB）放在签名之后，未认证的请求不读请求体。
+			// 绑定失败日志放在最后：它只观察处理器链的最终错误，且要能取到签名标识与已读入的请求体。
 			group.Middleware(
 				middlewares.NeverDoneCtx(),
 				middlewares.HandlerResponse(),
@@ -153,6 +155,7 @@ func registerRoutes(ctx context.Context, registrar pluginhost.HTTPRegistrar) err
 					bodylimit.Rule{PathSuffix: "/message/text", Limit: textBodyLimit},
 					bodylimit.Rule{PathSuffix: "/message/file", Limit: fileBodyLimit},
 				),
+				bindlog.Middleware(),
 			)
 			group.Bind(controller)
 		})
