@@ -4,7 +4,7 @@
 // 消息形态有三种：纯文本（SendText）、文件 / 图片（SendFile），二者进程内与对外 HTTP 共用；
 // 交互卡片（SendCard）仅进程内，卡片内容由调用方按推送应用构造，本插件只负责寻址与投递。
 //
-// 收件人可以是人（工号 / user_id，按企业自动扇出），也可以是群聊（chat_id，只经一个推送应用
+// 收件人可以是人（工号 / 姓名 / user_id，按企业自动扇出），也可以是群聊（chat_id，只经一个推送应用
 // 投递一次，见 Recipient）。
 //
 // 推送应用按调用方分组（配置 plugin.linapro-lark-push.push_groups.<分组名>）：每个请求必须
@@ -35,6 +35,9 @@ const (
 	// RecipientKindEmployeeNo 以工号为锚点：系统按「此人在哪些企业有身份」自动扇出。
 	// 这是常规用法——调用方通常只知道工号。
 	RecipientKindEmployeeNo RecipientKind = "employee_no"
+	// RecipientKindName 以 Moka 员工姓名（employee.name）为锚点：系统先解析为工号再按企业扇出。
+	// 姓名只做原值精确匹配、只认在职员工；找不到或重名时该收件人记失败，不静默取其一。
+	RecipientKindName RecipientKind = "name"
 	// RecipientKindUserID 直接给出企业级 user_id：调用方已经持有该标识时使用，
 	// 跳过工号解析，但仍按各推送应用投递（user_id 按企业签发，跨企业不可混用）。
 	RecipientKindUserID RecipientKind = "user_id"
@@ -44,14 +47,16 @@ const (
 )
 
 // Recipient 是一个收件人。三种写法互斥：
-//   - 人：EmployeeNo 与 UserID 二选一，同时给出时以 EmployeeNo 为准（工号是更稳定、更易得的
-//     寻址锚点）；
-//   - 群聊：只给 ChatID，并按需给 PushAppID。ChatID 与工号 / user_id 同时给出属于参数错误。
+//   - 人：EmployeeNo、UserID 与 Name 三选一（姓名由系统先解析为工号，语义见 RecipientKindName）；
+//     同时给出多种时属于参数错误——姓名与工号指向不同的人时会发错人，不取其一；
+//   - 群聊：只给 ChatID，并按需给 PushAppID。ChatID 与工号 / 姓名 / user_id 同时给出属于参数错误。
 type Recipient struct {
 	// EmployeeNo 是 Moka 工号。
 	EmployeeNo string
 	// UserID 是飞书企业级 user_id。
 	UserID string
+	// Name 是 Moka 员工姓名，系统按「在职、跨租户唯一」解析为工号后扇出；解析失败该条记失败项。
+	Name string
 	// ChatID 是飞书群聊 chat_id（oc_ 开头），仅群聊收件人使用。
 	ChatID string
 	// PushAppID 指定群聊由请求分组内哪个推送应用发送：分组只有一个推送应用时可省略，
@@ -64,7 +69,7 @@ type Recipient struct {
 func (r Recipient) Kind() RecipientKind {
 	switch {
 	case r.ChatID != "":
-		if r.EmployeeNo != "" || r.UserID != "" {
+		if r.EmployeeNo != "" || r.UserID != "" || r.Name != "" {
 			return ""
 		}
 		return RecipientKindChatID
@@ -72,6 +77,8 @@ func (r Recipient) Kind() RecipientKind {
 		return RecipientKindEmployeeNo
 	case r.UserID != "":
 		return RecipientKindUserID
+	case r.Name != "":
+		return RecipientKindName
 	default:
 		return ""
 	}
@@ -163,6 +170,12 @@ const (
 	DeliveryStatusAddressable DeliveryStatus = "addressable"
 	// DeliveryStatusNoIdentity 该员工在此推送应用对应的企业没有身份；工号写错或不存在也落在此状态。
 	DeliveryStatusNoIdentity DeliveryStatus = "no_identity"
+	// DeliveryStatusNameNotFound 按姓名寻址时，没有任何在职员工使用该姓名（员工改名后旧姓名、
+	// Moka 尚未同步到该人也是此状态）。
+	DeliveryStatusNameNotFound DeliveryStatus = "name_not_found"
+	// DeliveryStatusNameDuplicate 按姓名寻址时，去重后有两名及以上在职员工使用该姓名，
+	// 无法确定发给谁，拒绝发送（避免送错人）。
+	DeliveryStatusNameDuplicate DeliveryStatus = "name_duplicate"
 	// DeliveryStatusUserIDMissing 此人在该企业有 own 身份但 lark_user_id 为空：
 	// 身份应用缺「获取用户 user_id」权限，或该行早于授权、等待下次同步回填。只按本人判定。
 	DeliveryStatusUserIDMissing DeliveryStatus = "user_id_missing"
@@ -174,8 +187,11 @@ const (
 
 // Delivery 是一条「收件人 × 推送应用」的投递结果。
 type Delivery struct {
-	// EmployeeNo 是该收件人的工号（纯 user_id 寻址或群聊时为空）。
+	// EmployeeNo 是该收件人的工号（纯 user_id / 姓名寻址或群聊时为空；按姓名寻址并解析成功后
+	// 为解析出的工号）。
 	EmployeeNo string
+	// Name 是按姓名寻址时的原始姓名（其它寻址方式为空），用于失败项按调用方的寻址方式回显。
+	Name string
 	// ChatID 是群聊收件人的 chat_id（人类收件人为空）。
 	ChatID string
 	// UserID 是本次投递使用的企业级 user_id（未解析出时为空）。

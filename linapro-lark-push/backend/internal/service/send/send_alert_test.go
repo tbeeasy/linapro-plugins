@@ -78,6 +78,7 @@ func TestSendText_AlertsEmpcapUnbound(t *testing.T) {
 		func(context.Context, string) (empcap.LarkUserIDIndex, error) {
 			return empcap.LarkUserIDIndex{}, empcap.ErrServiceUnbound
 		},
+		fakeNamePath(nil),
 		alerter,
 	)
 	if err != nil {

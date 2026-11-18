@@ -23,12 +23,14 @@ import (
 	v1 "lina-plugin-linapro-lark-push/backend/api/push/v1"
 	"lina-plugin-linapro-lark-push/backend/cap/larkpushcap"
 	"lina-plugin-linapro-lark-push/backend/internal/larkpushcode"
+	"lina-plugin-linapro-lark-push/backend/internal/middleware/bindlog"
 	"lina-plugin-linapro-lark-push/backend/internal/middleware/bodylimit"
 	"lina-plugin-linapro-lark-push/backend/internal/middleware/signature"
 	"lina-plugin-linapro-lark-push/backend/internal/service/apikey"
 	"lina-plugin-linapro-lark-push/backend/internal/testutil/envelope"
 
 	"lina-core/pkg/bizerr"
+	"lina-core/pkg/logger"
 	"lina-core/pkg/plugin/capability/cachecap"
 )
 
@@ -122,6 +124,26 @@ func TestToResponse_RecipientIdentifier(t *testing.T) {
 		{UserID: "on_direct", LarkCode: 230013, LarkMsg: "no permission"},
 		{ChatID: "oc_x", LarkCode: 230001, LarkMsg: "chat not found", LarkReqID: "req-2"},
 		{EmployeeNo: "E2", LarkMsg: "user_id_missing"},
+	}
+	if !reflect.DeepEqual(res.Failed, want) {
+		t.Fatalf("failed want %+v, got %+v", want, res.Failed)
+	}
+}
+
+// TestToResponse_NameRecipientIdentifier 验证按姓名寻址的失败项只回姓名：
+// 解析出的工号属于服务端中间结果，不回给调用方，否则调用方会误以为可以用它重试。
+func TestToResponse_NameRecipientIdentifier(t *testing.T) {
+	res := toResponse(larkpushcap.SendResult{Deliveries: []larkpushcap.Delivery{
+		{Name: "张三", Status: larkpushcap.DeliveryStatusNameNotFound},
+		{Name: "李四", Status: larkpushcap.DeliveryStatusNameDuplicate},
+		// 姓名已解析成功、投递失败：仍按调用方的寻址方式回姓名，不带工号。
+		{Name: "王五", EmployeeNo: "E5", PushAppID: "cli_push_a",
+			Status: larkpushcap.DeliveryStatusFailed, FeishuCode: 230013, FeishuMsg: "no permission", FeishuReqID: "req-9"},
+	}})
+	want := []*v1.FailedRes{
+		{Name: "张三", LarkMsg: "name_not_found"},
+		{Name: "李四", LarkMsg: "name_duplicate"},
+		{Name: "王五", LarkCode: 230013, LarkMsg: "no permission", LarkReqID: "req-9"},
 	}
 	if !reflect.DeepEqual(res.Failed, want) {
 		t.Fatalf("failed want %+v, got %+v", want, res.Failed)
@@ -315,8 +337,8 @@ const (
 	testFileLimit = 31 << 20
 )
 
-// newPushServer 启动按生产装配的最小服务：统一响应（测试替身）→ 签名 → 按路由请求体上限 → Bind 控制器。
-// sender 为 nil 时模拟推送能力未就绪。
+// newPushServer 启动按生产装配的最小服务：统一响应（测试替身）→ 签名 → 按路由请求体上限 →
+// 绑定失败日志 → Bind 控制器。sender 为 nil 时模拟推送能力未就绪。
 func newPushServer(t *testing.T, sender larkpushcap.Sender) string {
 	t.Helper()
 	s := ghttp.GetServer("push-controller-test-" + t.Name())
@@ -332,6 +354,7 @@ func newPushServer(t *testing.T, sender larkpushcap.Sender) string {
 				bodylimit.Rule{PathSuffix: "/message/text", Limit: testTextLimit},
 				bodylimit.Rule{PathSuffix: "/message/file", Limit: testFileLimit},
 			),
+			bindlog.Middleware(),
 		)
 		group.Bind(c)
 	})
@@ -465,6 +488,36 @@ func TestSendText_GroupFromSignature(t *testing.T) {
 	}
 	if len(sender.reqs) != 1 || sender.reqs[0].Group != "ops-alert" {
 		t.Fatalf("投递分组应取自凭据绑定的 ops-alert, got %+v", sender.reqs)
+	}
+}
+
+// TestSendText_BindingFailureLogged 验证请求体绑定失败（字段类型不匹配，控制器不会执行）时
+// 调用方发出的请求体进了日志：响应仍是统一结构，且不触发投递。
+func TestSendText_BindingFailureLogged(t *testing.T) {
+	sender := &recordingSender{}
+	baseURL := newPushServer(t, sender)
+
+	logBuf := &bytes.Buffer{}
+	gl := logger.Logger()
+	oldWriter := gl.GetWriter()
+	gl.SetWriter(logBuf)
+	t.Cleanup(func() { gl.SetWriter(oldWriter) })
+
+	body := `{"recipients":"oops","text":"hi"}`
+	c := postText(t, baseURL, body)
+	if c.status != http.StatusOK || c.res.Code == 0 {
+		t.Fatalf("绑定失败应以 HTTP 200 + 非 0 code 拒绝, got %d %s", c.status, c.raw)
+	}
+	if len(sender.reqs) != 0 {
+		t.Fatalf("绑定失败的请求不应触发投递, got %+v", sender.reqs)
+	}
+
+	// 请求体按 strconv.Quote 转义后进日志，断言其中的字段片段。
+	logged := logBuf.String()
+	for _, want := range []string{`请求体绑定失败`, `path=/message/text`, `key_id=api-key-1`, `\"recipients\":\"oops\"`} {
+		if !strings.Contains(logged, want) {
+			t.Fatalf("日志应包含 %q, got %s", want, logged)
+		}
 	}
 }
 

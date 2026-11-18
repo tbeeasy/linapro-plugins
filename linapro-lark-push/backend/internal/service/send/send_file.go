@@ -65,6 +65,11 @@ func (s *serviceImpl) SendFile(ctx context.Context, req larkpushcap.SendFileRequ
 	if recipients, err = bindChatPushApps(recipients, pushApps); err != nil {
 		return larkpushcap.SendResult{}, err
 	}
+	// 姓名先解析为工号再扇出；解析失败的收件人作为失败项并入结果，不阻断同批其余投递。
+	var nameFailures []larkpushcap.Delivery
+	if recipients, nameFailures, err = s.resolveNames(ctx, group, recipients); err != nil {
+		return larkpushcap.SendResult{}, err
+	}
 
 	// dispatch 串行遍历推送应用，本 map 只在本次请求内使用，无需加锁。
 	uploads := make(map[string]uploadResult, len(pushApps))
@@ -86,6 +91,7 @@ func (s *serviceImpl) SendFile(ctx context.Context, req larkpushcap.SendFileRequ
 	if err != nil {
 		return larkpushcap.SendResult{}, err
 	}
+	result.Deliveries = append(result.Deliveries, nameFailures...)
 	// 文件名可能含业务敏感信息，日志只记形态与大小。
 	logger.Infof(ctx, "lark-push: 文件投递 group=%s biz_ref=%s 形态=%s 大小=%d 字节 上传应用数=%d",
 		group, req.BizRef, payload.kind(), len(payload.content), len(uploads))

@@ -95,6 +95,7 @@ func registerRoutes(ctx context.Context, registrar pluginhost.HTTPRegistrar) err
 		hostConfig,
 		func(appID, appSecret string) send.MessageSender { return larkim.NewClient(appID, appSecret) },
 		empcap.LarkUserIDResolverByApp,
+		empcap.EmployeesByNamesAnyTenant,
 		alerter,
 	)
 	if err != nil {

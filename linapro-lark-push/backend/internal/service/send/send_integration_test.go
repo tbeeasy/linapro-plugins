@@ -78,6 +78,7 @@ func TestSendIntegration(t *testing.T) {
 		&fakeHostConfig{values: cfg},
 		func(appID, appSecret string) MessageSender { return larkim.NewClient(appID, appSecret) },
 		indexPath,
+		empcap.EmployeesByNamesAnyTenant,
 		nil,
 	)
 	if err != nil {
@@ -128,6 +129,7 @@ func TestStatusIntegration(t *testing.T) {
 		&fakeHostConfig{values: cfg},
 		func(appID, appSecret string) MessageSender { return larkim.NewClient(appID, appSecret) },
 		empcap.LarkUserIDResolverByApp,
+		empcap.EmployeesByNamesAnyTenant,
 		nil,
 	)
 	if err != nil {

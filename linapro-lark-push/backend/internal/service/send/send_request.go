@@ -29,7 +29,7 @@ func normalizeGroup(group string) (string, error) {
 	return group, nil
 }
 
-// normalizeRecipients 去首尾空白、去重（同工号 / 同 user_id / 同群聊只发一次）并校验寻址方式。
+// normalizeRecipients 去首尾空白、去重（同工号 / 同 user_id / 同姓名 / 同群聊只发一次）并校验寻址方式。
 func normalizeRecipients(in []larkpushcap.Recipient) ([]larkpushcap.Recipient, error) {
 	if len(in) == 0 {
 		return nil, invalidParam("收件人不能为空")
@@ -40,17 +40,22 @@ func normalizeRecipients(in []larkpushcap.Recipient) ([]larkpushcap.Recipient, e
 		r = larkpushcap.Recipient{
 			EmployeeNo: strings.TrimSpace(r.EmployeeNo),
 			UserID:     strings.TrimSpace(r.UserID),
+			Name:       strings.TrimSpace(r.Name),
 			ChatID:     strings.TrimSpace(r.ChatID),
 			PushAppID:  strings.TrimSpace(r.PushAppID),
 		}
 		kind := r.Kind()
 		if kind == "" {
-			return nil, invalidParam("每个收件人须且只能给出 employee_no / user_id（人）或 chat_id（群聊）之一")
+			return nil, invalidParam("每个收件人须且只能给出 employee_no / user_id / name（人）或 chat_id（群聊）之一")
+		}
+		// 人的三种写法互斥：姓名与工号指向不同的人时静默取其一就是发错人，不做「以工号为准」兜底。
+		if kind != larkpushcap.RecipientKindChatID && humanAddressKinds(r) > 1 {
+			return nil, invalidParam("employee_no / user_id / name 只能给出一个，不能混用")
 		}
 		if kind != larkpushcap.RecipientKindChatID && r.PushAppID != "" {
 			return nil, invalidParam("push_app_id 只能用于群聊收件人")
 		}
-		key := string(kind) + "\x00" + r.EmployeeNo + "\x00" + r.UserID + "\x00" + r.ChatID + "\x00" + r.PushAppID
+		key := string(kind) + "\x00" + r.EmployeeNo + "\x00" + r.UserID + "\x00" + r.Name + "\x00" + r.ChatID + "\x00" + r.PushAppID
 		if _, dup := seen[key]; dup {
 			continue
 		}
@@ -60,8 +65,27 @@ func normalizeRecipients(in []larkpushcap.Recipient) ([]larkpushcap.Recipient, e
 	return out, nil
 }
 
-// bindChatPushApps 为群聊收件人确定发送应用，并在发起任何飞书请求前校验：
-//   - 分组只有一个推送应用时，未指定 push_app_id 的群聊默认用它；
+// humanAddressKinds 统计一个收件人给出了几种「人」的寻址方式（工号 / user_id / 姓名）。
+// 群聊收件人不参与该判定，返回 0。用于拒绝混用：Kind() 对混用只返回空串（与「全部为空」不可区分），
+// 这里单独计数以便给出更准确的参数错误原因。
+func humanAddressKinds(r larkpushcap.Recipient) int {
+	if r.ChatID != "" {
+		return 0
+	}
+	n := 0
+	if r.EmployeeNo != "" {
+		n++
+	}
+	if r.UserID != "" {
+		n++
+	}
+	if r.Name != "" {
+		n++
+	}
+	return n
+}
+
+// bindChatPushApps 为群聊收件人确定发送应用，并在发起任何飞书请求前校验：//   - 分组只有一个推送应用时，未指定 push_app_id 的群聊默认用它；
 //   - 分组有多个推送应用时，群聊必须指定 push_app_id；
 //   - push_app_id 必须属于本分组（只认凭据齐备的推送应用）。
 //

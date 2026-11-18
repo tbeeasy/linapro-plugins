@@ -50,6 +50,13 @@ type ClientFactory func(appID, appSecret string) MessageSender
 // 测试传入内存索引，本组件不直接依赖 empcap 的全局绑定。
 type IndexPath func(ctx context.Context, identityAppID string) (empcap.LarkUserIDIndex, error)
 
+// NamePath 取「姓名 → 同名全部员工行」的来源，供姓名收件人解析为工号。由装配层传入 empcap 门面，
+// 测试传入内存映射，本组件不直接依赖 empcap 的全局绑定。
+//
+// 返回值语义由数据 owner 定义：原值精确匹配、不排除离职员工，重名与在职判定由本组件完成
+// （业务口径「重名算错误」属于推送侧选择，不塞进数据 owner）。
+type NamePath func(ctx context.Context, names []string) (map[string][]*empcap.Employee, error)
+
 // Service 是推送编排组件对外的默认接口，即门面 larkpushcap.Sender 的完整实现。
 //
 // 这里直接复用 owner 侧已发布的接口而不是重写一份等价方法集：调用方只认 larkpushcap.Sender，
@@ -70,13 +77,15 @@ type serviceImpl struct {
 	newClient ClientFactory
 	// indexPath 取「身份应用 → 工号映射」。
 	indexPath IndexPath
+	// namePath 取「姓名 → 同名员工行」，用于把姓名收件人解析为工号。
+	namePath NamePath
 	// alerter 报告部署与数据缺陷；为 nil 表示告警通道未配置（属预期降级，不告警）。
 	alerter alert.Service
 }
 
 // New 构造推送编排服务。
 //
-// newClient 与 indexPath 是必填的运行期依赖，缺失说明装配层漏传，直接返回错误由上层决定
+// newClient、indexPath 与 namePath 是必填的运行期依赖，缺失说明装配层漏传，直接返回错误由上层决定
 // 是否中止进程；hostConfig 允许为 nil——宿主未暴露配置能力时按「配置不可用」失败关闭，
 // 由 Codes 中的 CodeHostConfigMissing 体现，这是规范定义的降级路径而非装配缺陷。
 // alerter 允许为 nil：告警通道未配置时静默不告警，不影响推送。
@@ -84,6 +93,7 @@ func New(
 	hostConfig hostconfigcap.Service,
 	newClient ClientFactory,
 	indexPath IndexPath,
+	namePath NamePath,
 	alerter alert.Service,
 ) (Service, error) {
 	if newClient == nil {
@@ -92,7 +102,16 @@ func New(
 	if indexPath == nil {
 		return nil, gerror.New("lina-plugin-linapro-lark-push: 构造推送服务失败：寻址来源未注入")
 	}
-	return &serviceImpl{hostConfig: hostConfig, newClient: newClient, indexPath: indexPath, alerter: alerter}, nil
+	if namePath == nil {
+		return nil, gerror.New("lina-plugin-linapro-lark-push: 构造推送服务失败：姓名解析来源未注入")
+	}
+	return &serviceImpl{
+		hostConfig: hostConfig,
+		newClient:  newClient,
+		indexPath:  indexPath,
+		namePath:   namePath,
+		alerter:    alerter,
+	}, nil
 }
 
 // notify 在告警通道已配置时报告一个缺陷。alerter 为 nil 时什么都不做。

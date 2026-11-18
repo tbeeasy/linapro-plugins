@@ -39,6 +39,11 @@ func (s *serviceImpl) SendText(ctx context.Context, req larkpushcap.SendTextRequ
 	if recipients, err = bindChatPushApps(recipients, pushApps); err != nil {
 		return larkpushcap.SendResult{}, err
 	}
+	// 姓名先解析为工号再扇出；解析失败的收件人作为失败项并入结果，不阻断同批其余投递。
+	var nameFailures []larkpushcap.Delivery
+	if recipients, nameFailures, err = s.resolveNames(ctx, group, recipients); err != nil {
+		return larkpushcap.SendResult{}, err
+	}
 
 	deliver := func(ctx context.Context, sender MessageSender, _ larkcfg.PushApp, _ larkpushcap.Recipient, receiveIDType, receiveID string) (string, error) {
 		return sender.SendText(ctx, receiveIDType, receiveID, text)
@@ -47,6 +52,7 @@ func (s *serviceImpl) SendText(ctx context.Context, req larkpushcap.SendTextRequ
 	if err != nil {
 		return larkpushcap.SendResult{}, err
 	}
+	result.Deliveries = append(result.Deliveries, nameFailures...)
 	s.logRequest(ctx, group, req.BizSource, req.BizRef, len(req.Recipients), pushApps, result)
 	return result, nil
 }

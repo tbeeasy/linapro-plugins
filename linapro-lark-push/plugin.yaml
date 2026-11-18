@@ -27,15 +27,14 @@ default_install_mode: global
 # 插件说明，概述能力边界。
 description: |
   飞书消息推送能力插件（文本、文件 / 图片 + 进程内交互卡片；收件人可以是人或群聊）。
-  - 进程内门面 backend/cap/larkpushcap：其它插件以「工号 / 群聊 + 文本 / 文件 / 卡片构造函数」请求投递；
-  - 对外 HTTP 接口 POST /x/linapro-lark-push/open/v1/message/text 与 /message/file，插件自建 HMAC 签名鉴权；
-  - 签名凭据在后台「系统设置 → 飞书推送凭据」维护（含群聊目标，调用方不能指定 chat_id），
-    每次请求查库，停用 / 删除即时生效；
-  - 个人收件人按工号表达，系统按「此人在哪些企业有身份」自动扇出（双发为预期行为）；
-    群聊收件人只经指定的推送应用投递一次；
+  - 进程内门面 backend/cap/larkpushcap：其它插件以「工号 / 姓名 / 群聊 + 文本 / 文件 / 卡片」请求投递；
+  - 对外 HTTP 接口 /open/v1/message/text 与 /message/file，插件自建 HMAC 签名鉴权；
+  - 签名凭据在后台「系统设置 → 飞书推送凭据」维护（含群聊目标，调用方不能指定 chat_id），每次请求查库；
+  - 个人收件人按工号 / user_id / 姓名表达，按「此人在哪些企业有身份」自动扇出（双发为预期行为）；
+    姓名只认在职员工，找不到或重名时该条失败；群聊收件人只经指定的推送应用投递一次；
   - 推送应用按调用方分组（push_groups.<调用方插件 ID>），请求必须带分组、只用该分组投递；
     只用推送应用凭据发送，identity_app_id 仅用于查 user_id。
-  依赖 linapro-employee-core 的 empcap 提供「工号 → 企业级 user_id」寻址。
+  依赖 linapro-employee-core 的 empcap 提供「工号 → user_id」寻址与「姓名 → 员工」解析。
 
 # 插件作者或归属团队。
 author: linapro

@@ -33,7 +33,7 @@ func invalidParam(reason string) error {
 func toRecipients(recipients []v1.RecipientReq, identity signature.Identity) []larkpushcap.Recipient {
 	out := make([]larkpushcap.Recipient, 0, len(recipients)+1)
 	for _, item := range recipients {
-		out = append(out, larkpushcap.Recipient{EmployeeNo: item.EmployeeNo, UserID: item.UserID})
+		out = append(out, larkpushcap.Recipient{EmployeeNo: item.EmployeeNo, UserID: item.UserID, Name: item.Name})
 	}
 	if identity.ChatID != "" {
 		out = append(out, larkpushcap.Recipient{ChatID: identity.ChatID, PushAppID: identity.ChatPushAppID})
@@ -119,17 +119,23 @@ func toResponse(result larkpushcap.SendResult) v1.SendResult {
 }
 
 // toFailedRes 把一条失败明细投影为失败项：收件人标识 + 飞书错误三元组。
+// 收件人标识按调用方的寻址方式给一个：姓名寻址只回姓名，不回解析出的工号。
 func toFailedRes(d larkpushcap.Delivery) *v1.FailedRes {
 	item := &v1.FailedRes{
-		EmployeeNo: d.EmployeeNo,
-		ChatID:     d.ChatID,
-		LarkCode:   d.FeishuCode,
-		LarkMsg:    d.FeishuMsg,
-		LarkReqID:  d.FeishuReqID,
+		ChatID:    d.ChatID,
+		LarkCode:  d.FeishuCode,
+		LarkMsg:   d.FeishuMsg,
+		LarkReqID: d.FeishuReqID,
 	}
-	if d.EmployeeNo == "" && d.ChatID == "" {
+	switch {
+	case d.Name != "":
+		// 按姓名寻址：收件人只认调用方给的名字，解析出的工号属于服务端中间结果。
+		item.Name = d.Name
+	case d.EmployeeNo == "" && d.ChatID == "":
 		// user_id 寻址的收件人只能用 user_id 标识；工号寻址时的 user_id 是解析结果，不回给调用方。
 		item.UserID = d.UserID
+	default:
+		item.EmployeeNo = d.EmployeeNo
 	}
 	if item.LarkMsg == "" {
 		// 非飞书侧原因（工号不存在、身份碰撞、网络失败等）没有飞书错误信息，用失败状态说明原因。

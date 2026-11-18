@@ -483,7 +483,7 @@ caller retries only those recipients:
 
 | field | meaning |
 |---|---|
-| `employee_no` / `user_id` / `chat_id` | the failed recipient, in the same addressing form as the request |
+| `employee_no` / `user_id` / `name` / `chat_id` | the failed recipient, in the same addressing form as the request; name-addressed items carry only `name`, never the resolved employee number |
 | `lark_code` | Feishu error code; `0` for non-Feishu reasons |
 | `lark_msg` | Feishu error message; for non-Feishu reasons one of the values below |
 | `lark_req_id` | Feishu request ID for Feishu support; empty for non-Feishu reasons |
@@ -495,6 +495,8 @@ Non-Feishu reasons (`lark_code` is `0`):
 | `no_identity` | the person has no own identity in **any** company (missing in only some companies is normal and not a failure); a mistyped or nonexistent number also lands here | check the number or the identity sync |
 | `user_id_missing` | own row exists but `lark_user_id` is blank | usually the identity app lacks the "get user user_id" permission, or the row awaits the next sync |
 | `collision` | the employee number hits several own identities in a company | data problem; refused to avoid messaging the wrong person |
+| `name_not_found` | name addressing found no **active** employee with that name (renamed, departed, or not yet synced from Moka) | check the name, or switch to the employee number |
+| `name_duplicate` | name addressing found two or more active employees with that name | data problem; refused rather than picking one |
 | `failed` | no Feishu response (e.g. network failure) | safe to retry |
 
 When a person has identities in several companies, each company's failure is listed
@@ -515,6 +517,27 @@ returns `LINAPRO_LARK_PUSH_INVALID_PARAM`.
 ```
 
 Failed chat items carry `chat_id` instead of `employee_no` / `user_id`.
+
+### Addressing recipients by name
+
+Each `recipients` element addresses a person by exactly one of `employee_no`, `user_id`
+or `name`; mixing them is rejected as an invalid parameter:
+
+```json
+{"recipients": [{"name": "Zhang San"}, {"employee_no": "GZ001198"}], "text": "Alert: line 3 turbine temperature above threshold"}
+```
+
+- The name is the Moka employee name (`employee.name`) and is matched **exactly as stored**,
+  so it must match the employee directory verbatim (no case or width normalisation);
+- Only **active** employees are considered; departed employees never match;
+- Once resolved, the name becomes an employee number and goes through exactly the same
+  per-company fan-out, so "one message per company where the person has an identity" still holds;
+- No active employee with that name → that item fails with `name_not_found`; two or more
+  active employees with that name → `name_duplicate` (it never picks one arbitrarily).
+  Either way only that item fails; the rest of the batch is delivered;
+- Name addressing depends on `linapro-employee-core`. When it is disabled the whole request
+  returns HTTP 503 with `LINAPRO_LARK_PUSH_EMPCAP_UNBOUND` rather than guessing;
+- **Prefer the employee number**: it survives renames; use names only when the caller has no number.
 
 ### File push (`POST /x/linapro-lark-push/open/v1/message/file`)
 

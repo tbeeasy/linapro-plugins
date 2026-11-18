@@ -37,6 +37,11 @@ func (s *serviceImpl) SendCard(ctx context.Context, req larkpushcap.SendCardRequ
 	if recipients, err = bindChatPushApps(recipients, pushApps); err != nil {
 		return larkpushcap.SendResult{}, err
 	}
+	// 姓名先解析为工号再扇出；解析失败的收件人作为失败项并入结果，不阻断同批其余投递。
+	var nameFailures []larkpushcap.Delivery
+	if recipients, nameFailures, err = s.resolveNames(ctx, group, recipients); err != nil {
+		return larkpushcap.SendResult{}, err
+	}
 
 	deliver := func(ctx context.Context, sender MessageSender, app larkcfg.PushApp, r larkpushcap.Recipient, receiveIDType, receiveID string) (string, error) {
 		cardJSON, bErr := req.Build(toPublicPushApp(app), r)
@@ -53,6 +58,7 @@ func (s *serviceImpl) SendCard(ctx context.Context, req larkpushcap.SendCardRequ
 	if err != nil {
 		return larkpushcap.SendResult{}, err
 	}
+	result.Deliveries = append(result.Deliveries, nameFailures...)
 	if req.DryRun {
 		// 干跑没有真实投递：把「本会发出」的明细改记为可投递，不写投递日志（无飞书调用可对账）。
 		markAddressable(result.Deliveries)

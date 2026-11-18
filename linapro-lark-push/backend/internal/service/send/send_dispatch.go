@@ -132,10 +132,17 @@ func (s *serviceImpl) deliverOne(
 	r larkpushcap.Recipient,
 	deliver deliverFunc,
 ) larkpushcap.Delivery {
-	d := larkpushcap.Delivery{PushAppID: app.AppID, PushAppName: app.Name, EmployeeNo: r.EmployeeNo, ChatID: r.ChatID}
+	d := larkpushcap.Delivery{PushAppID: app.AppID, PushAppName: app.Name, EmployeeNo: r.EmployeeNo, Name: r.Name, ChatID: r.ChatID}
 
 	if r.Kind() == larkpushcap.RecipientKindChatID {
 		return finishDelivery(ctx, d, sender, app, r, larkim.ReceiveIDTypeChatID, r.ChatID, deliver)
+	}
+	// 姓名收件人 MUST 已由 resolveNames 解析为工号；走到这里说明内部不变量被破坏，
+	// 记为失败而不是拿空 user_id 去调飞书。
+	if r.Kind() == larkpushcap.RecipientKindName {
+		d.Status = larkpushcap.DeliveryStatusFailed
+		d.Error = "姓名收件人未经解析即进入投递（内部错误）"
+		return d
 	}
 
 	userID := r.UserID // 直接给 user_id：调用方已确认标识属于本企业空间，跳过查表。
@@ -210,8 +217,8 @@ func (s *serviceImpl) logRequest(
 			continue
 		}
 		logger.Warningf(ctx,
-			"lark-push: 投递失败 request_id=%s group=%s biz_source=%s biz_ref=%s push_app=%s(%s) 工号=%s user_id=%s chat_id=%s 状态=%s feishu_code=%d feishu_req_id=%s err=%s",
-			gctx.CtxId(ctx), group, bizSource, bizRef, d.PushAppName, d.PushAppID, d.EmployeeNo, d.UserID, d.ChatID,
+			"lark-push: 投递失败 request_id=%s group=%s biz_source=%s biz_ref=%s push_app=%s(%s) 姓名=%s 工号=%s user_id=%s chat_id=%s 状态=%s feishu_code=%d feishu_req_id=%s err=%s",
+			gctx.CtxId(ctx), group, bizSource, bizRef, d.PushAppName, d.PushAppID, d.Name, d.EmployeeNo, d.UserID, d.ChatID,
 			d.Status, d.FeishuCode, d.FeishuReqID, d.Error)
 	}
 	logger.Infof(ctx,

@@ -161,10 +161,36 @@ func newService(t *testing.T, cfgValues map[string]any, idx map[string]empcap.La
 }
 
 // newServiceWithAlerter 与 newService 相同，但可注入告警通道并返回它记录的事件。
+// 姓名解析来源固定为「查不到任何人」：用例不涉及姓名收件人时不会被调用。
 func newServiceWithAlerter(
 	t *testing.T,
 	cfgValues map[string]any,
 	idx map[string]empcap.LarkUserIDIndex,
+	failFor map[string]error,
+	alerter alert.Service,
+) (Service, *[]sentCall) {
+	t.Helper()
+	return buildService(t, cfgValues, idx, fakeNamePath(nil), failFor, alerter)
+}
+
+// newServiceWithNames 与 newService 相同，但注入按姓名取员工行的解析来源。
+func newServiceWithNames(
+	t *testing.T,
+	cfgValues map[string]any,
+	idx map[string]empcap.LarkUserIDIndex,
+	byName map[string][]*empcap.Employee,
+	alerter alert.Service,
+) (Service, *[]sentCall) {
+	t.Helper()
+	return buildService(t, cfgValues, idx, fakeNamePath(byName), nil, alerter)
+}
+
+// buildService 是各构造 helper 的共同实现。
+func buildService(
+	t *testing.T,
+	cfgValues map[string]any,
+	idx map[string]empcap.LarkUserIDIndex,
+	namePath NamePath,
 	failFor map[string]error,
 	alerter alert.Service,
 ) (Service, *[]sentCall) {
@@ -181,6 +207,7 @@ func newServiceWithAlerter(
 			return &fakeSender{appID: appID, calls: calls, failFor: failFor}
 		},
 		fakeIndexPath(idx),
+		namePath,
 		alerter,
 	)
 	if err != nil {
@@ -200,19 +227,43 @@ func fakeIndexPath(idx map[string]empcap.LarkUserIDIndex) IndexPath {
 	}
 }
 
-// TestNew_RequiresRuntimeDependencies 验证发送器工厂与寻址来源是必填依赖：缺失时构造失败，
-// 而不是在运行期退化为自行创建客户端。
+// fakeNamePath 返回按姓名取内存员工行的解析来源；未登记的姓名不入映射（等价于「查不到」）。
+func fakeNamePath(byName map[string][]*empcap.Employee) NamePath {
+	return func(_ context.Context, names []string) (map[string][]*empcap.Employee, error) {
+		out := make(map[string][]*empcap.Employee, len(names))
+		for _, name := range names {
+			if rows, ok := byName[name]; ok {
+				out[name] = rows
+			}
+		}
+		return out, nil
+	}
+}
+
+// noNames 是「本次请求不涉及姓名收件人」场景使用的空解析来源：被调用即说明用例前提不成立。
+func noNames(t *testing.T) NamePath {
+	t.Helper()
+	return func(context.Context, []string) (map[string][]*empcap.Employee, error) {
+		t.Fatal("不含姓名收件人时不应查询姓名")
+		return nil, nil
+	}
+}
+
+// TestNew_RequiresRuntimeDependencies 验证发送器工厂、寻址来源与姓名解析来源是必填依赖：
+// 缺失时构造失败，而不是在运行期退化为自行创建客户端或静默跳过姓名收件人。
 func TestNew_RequiresRuntimeDependencies(t *testing.T) {
 	hostCfg := &fakeHostConfig{values: twoCompanyConfig("x")}
 	noopFactory := func(string, string) MessageSender { return &fakeSender{calls: &[]sentCall{}} }
 	noopIndex := fakeIndexPath(nil)
+	noopName := fakeNamePath(nil)
 
 	cases := []struct {
 		name  string
 		build func() (Service, error)
 	}{
-		{name: "缺发送器工厂", build: func() (Service, error) { return New(hostCfg, nil, noopIndex, nil) }},
-		{name: "缺寻址来源", build: func() (Service, error) { return New(hostCfg, noopFactory, nil, nil) }},
+		{name: "缺发送器工厂", build: func() (Service, error) { return New(hostCfg, nil, noopIndex, noopName, nil) }},
+		{name: "缺寻址来源", build: func() (Service, error) { return New(hostCfg, noopFactory, nil, noopName, nil) }},
+		{name: "缺姓名解析来源", build: func() (Service, error) { return New(hostCfg, noopFactory, noopIndex, nil, nil) }},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -285,6 +336,7 @@ func TestStatus_NilHostConfig(t *testing.T) {
 		func(context.Context, string) (empcap.LarkUserIDIndex, error) {
 			return empcap.LarkUserIDIndex{}, nil
 		},
+		fakeNamePath(nil),
 		nil,
 	)
 	if err != nil {

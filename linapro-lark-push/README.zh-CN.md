@@ -430,7 +430,7 @@ curl -sS -X POST "$HOST$PATH_ONLY" \
 
 | 字段 | 含义 |
 |---|---|
-| `employee_no` / `user_id` / `chat_id` | 失败的收件人，按请求里的寻址方式给出其一 |
+| `employee_no` / `user_id` / `name` / `chat_id` | 失败的收件人，按请求里的寻址方式给出其一；姓名寻址只回姓名，不回解析出的工号 |
 | `lark_code` | 飞书错误码；非飞书侧原因为 `0` |
 | `lark_msg` | 飞书错误信息；非飞书侧原因时为下表中的原因 |
 | `lark_req_id` | 飞书请求 ID，向飞书反馈问题时使用；非飞书侧原因时为空 |
@@ -442,6 +442,8 @@ curl -sS -X POST "$HOST$PATH_ONLY" \
 | `no_identity` | 该员工在**所有**企业都没有 own 身份（只在部分企业没有身份是正常的，不算失败）；工号写错或不存在也是此状态 | 核对工号或身份同步 |
 | `user_id_missing` | own 身份存在但 `lark_user_id` 为空 | **多半是身份应用缺「获取用户 user_id」权限**，或该行待下次同步回填 |
 | `collision` | 同一工号在某企业命中多条 own 身份 | 数据问题，拒绝发送以避免送错人 |
+| `name_not_found` | 按姓名寻址时，没有任何**在职**员工使用该姓名（员工改名、离职或 Moka 尚未同步到该人） | 核对姓名，或改用工号 |
+| `name_duplicate` | 按姓名寻址时，有两名及以上在职员工使用该姓名，无法确定发给谁 | 数据异常，请 HR 按约定在姓名后标记部门 |
 | `failed` | 网络失败等未拿到飞书响应 | 可重试 |
 
 一个人在多家企业有身份时，各企业的失败分别列出（同一工号可能出现多次）；重试该工号会向他所有
@@ -458,6 +460,24 @@ curl -sS -X POST "$HOST$PATH_ONLY" \
 ```
 
 群聊的失败项带 `chat_id`，不带 `employee_no` / `user_id`。
+
+### 按姓名寻址
+
+`recipients` 的每个元素按 `employee_no`、`user_id`、`name` **三选一**寻址，混用会以参数错误被拒：
+
+```json
+{"recipients": [{"name": "张三"}, {"employee_no": "GZ001198"}], "text": "预警：产线 3 号机组温度超过阈值"}
+```
+
+- 姓名取 Moka 员工姓名（`employee.name`），**原值精确匹配**——需与员工目录里完全一致（不做大小写或
+  全半角归一）；
+- 只认**在职**员工，离职员工不参与匹配；
+- 解析成功后按解析出的工号走与其他寻址完全相同的企业扇出，因此「在几家企业有身份就收到几条」不变；
+- 没有在职员工使用该姓名 → 该条为 `name_not_found`；有两名及以上在职员工使用该姓名 → `name_duplicate`
+  （**不会**随便挑一个人发）；两者都只影响该条，其余收件人照常投递；
+- 姓名寻址依赖 `linapro-employee-core`，未启用时整批请求返回 HTTP 503 与
+  `LINAPRO_LARK_PUSH_EMPCAP_UNBOUND`，不会降级为猜测；
+- **推荐优先用工号**：工号不受改名影响，姓名只在调用方拿不到工号时使用。
 
 ### 文件推送（`POST /x/linapro-lark-push/open/v1/message/file`）
 

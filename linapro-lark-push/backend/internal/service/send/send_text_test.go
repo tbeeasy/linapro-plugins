@@ -355,6 +355,7 @@ func TestSendText_IndexError(t *testing.T) {
 		func(context.Context, string) (empcap.LarkUserIDIndex, error) {
 			return empcap.LarkUserIDIndex{}, errors.New("db down")
 		},
+		fakeNamePath(nil),
 		nil,
 	)
 	if err != nil {
@@ -501,6 +502,7 @@ func TestSendText_ChatSingleAppDefault(t *testing.T) {
 			t.Fatal("纯群聊请求不应查询寻址索引")
 			return empcap.LarkUserIDIndex{}, nil
 		},
+		noNames(t),
 		nil,
 	)
 	if err != nil {
