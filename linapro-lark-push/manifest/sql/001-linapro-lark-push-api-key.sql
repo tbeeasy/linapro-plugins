@@ -24,19 +24,19 @@ CREATE TABLE IF NOT EXISTS plugin_linapro_lark_push_api_key (
 ALTER TABLE plugin_linapro_lark_push_api_key ADD COLUMN IF NOT EXISTS "chat_id" VARCHAR(128) NOT NULL DEFAULT '';
 ALTER TABLE plugin_linapro_lark_push_api_key ADD COLUMN IF NOT EXISTS "chat_push_app_id" VARCHAR(64) NOT NULL DEFAULT '';
 
-COMMENT ON TABLE plugin_linapro_lark_push_api_key IS 'Lark push external API signature credential table';
-COMMENT ON COLUMN plugin_linapro_lark_push_api_key."id" IS 'Credential ID';
-COMMENT ON COLUMN plugin_linapro_lark_push_api_key."name" IS 'Caller display name';
-COMMENT ON COLUMN plugin_linapro_lark_push_api_key."app_key" IS 'Public app key carried in the X-App-Key header';
-COMMENT ON COLUMN plugin_linapro_lark_push_api_key."secret" IS 'HMAC-SHA256 signing secret';
-COMMENT ON COLUMN plugin_linapro_lark_push_api_key."push_group" IS 'Bound push group name in push_groups config';
-COMMENT ON COLUMN plugin_linapro_lark_push_api_key."chat_id" IS 'Feishu group chat_id pushed with every request of this credential; empty means no group push';
-COMMENT ON COLUMN plugin_linapro_lark_push_api_key."chat_push_app_id" IS 'Push app ID in the bound group used for the chat; empty means the group default (single push app)';
-COMMENT ON COLUMN plugin_linapro_lark_push_api_key."status" IS 'Status from dict sys_normal_disable: 1=normal 0=disabled';
-COMMENT ON COLUMN plugin_linapro_lark_push_api_key."remark" IS 'Remark';
-COMMENT ON COLUMN plugin_linapro_lark_push_api_key."created_at" IS 'Creation time';
-COMMENT ON COLUMN plugin_linapro_lark_push_api_key."updated_at" IS 'Update time';
-COMMENT ON COLUMN plugin_linapro_lark_push_api_key."deleted_at" IS 'Deletion time';
+COMMENT ON TABLE plugin_linapro_lark_push_api_key IS '飞书推送对外接口签名凭据表';
+COMMENT ON COLUMN plugin_linapro_lark_push_api_key."id" IS '凭据 ID';
+COMMENT ON COLUMN plugin_linapro_lark_push_api_key."name" IS '调用方展示名称';
+COMMENT ON COLUMN plugin_linapro_lark_push_api_key."app_key" IS '携带在 X-App-Key 请求头中的公开 app key';
+COMMENT ON COLUMN plugin_linapro_lark_push_api_key."secret" IS 'HMAC-SHA256 签名密钥';
+COMMENT ON COLUMN plugin_linapro_lark_push_api_key."push_group" IS '在 push_groups 配置中绑定的推送分组名称';
+COMMENT ON COLUMN plugin_linapro_lark_push_api_key."chat_id" IS '该凭据每次请求推送的飞书群聊 chat_id；为空表示不推送群聊';
+COMMENT ON COLUMN plugin_linapro_lark_push_api_key."chat_push_app_id" IS '用于该群聊的绑定分组内的推送应用 ID；为空表示使用分组默认（单一推送应用）';
+COMMENT ON COLUMN plugin_linapro_lark_push_api_key."status" IS '状态，取自字典 sys_normal_disable：1=正常 0=停用';
+COMMENT ON COLUMN plugin_linapro_lark_push_api_key."remark" IS '备注';
+COMMENT ON COLUMN plugin_linapro_lark_push_api_key."created_at" IS '创建时间';
+COMMENT ON COLUMN plugin_linapro_lark_push_api_key."updated_at" IS '更新时间';
+COMMENT ON COLUMN plugin_linapro_lark_push_api_key."deleted_at" IS '删除时间';
 
 -- 签名中间件按 app_key 查询存活凭据；删除后同名 app_key 可重建，故唯一约束只覆盖未删除行。
 CREATE UNIQUE INDEX IF NOT EXISTS uk_plugin_linapro_lark_push_api_key_app_key_alive
