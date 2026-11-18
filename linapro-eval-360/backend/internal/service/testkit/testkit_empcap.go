@@ -69,11 +69,15 @@ func (s *EmployeeService) UpsertEmployee(ctx context.Context, tenantID int, prof
 	return id, nil
 }
 
-// MarkDeparted 把员工置为离职。
-func (s *EmployeeService) MarkDeparted(ctx context.Context, tenantID int, empID int64) error {
+// MarkDeparted 把员工置为离职，并一并写入离职日期（空字符串表示落 NULL）。
+func (s *EmployeeService) MarkDeparted(ctx context.Context, tenantID int, empID int64, leaveDate string) error {
+	data := g.Map{"status": empcap.StatusDeparted, "leave_date": nil}
+	if leaveDate != "" {
+		data["leave_date"] = leaveDate
+	}
 	_, err := g.DB().Model("plugin_linapro_employee_core_employee").Ctx(ctx).
 		Where("tenant_id", tenantID).Where("id", empID).
-		Data(g.Map{"status": empcap.StatusDeparted}).Update()
+		Data(data).Update()
 	return err
 }
 

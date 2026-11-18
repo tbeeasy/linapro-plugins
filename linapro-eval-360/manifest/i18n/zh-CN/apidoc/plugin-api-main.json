@@ -54,6 +54,13 @@
                 }
               }
             },
+            "QuestionnaireCard": {
+              "fields": {
+                "evaluatorCount": {
+                  "dc": "该问卷评价关系中去重后的评价者人数；同一评价者评价多名被评估人只计一次"
+                }
+              }
+            },
             "SendFailedItem": {
               "fields": {
                 "employeeNos": {

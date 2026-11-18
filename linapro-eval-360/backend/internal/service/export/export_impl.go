@@ -1,6 +1,6 @@
 // export_impl.go 实现按答案 / 按得分两张明细导出。
 //
-// 两表共用：固定前导列（序号|提交时间|所用时间|关系角色|被评价对象）+ 题目动态列。
+// 两表共用：固定前导列（序号|提交时间|所用时间|评价人|关系角色|被评价人|被评估人职务|被评估人部门|项目）+ 题目动态列。
 // 只导已提交的作答（一行 = 一条已填评价关系）。矩阵题一题一列：行即被评估人，
 // 一条作答只对应一个被评估人，故该列就是其所选评价项（答案 row_id 恒为 0）。
 package export
@@ -40,14 +40,20 @@ func stripHTML(s string) string {
 }
 
 // 前导列（1-based）。
+// 顺序：序号 → 提交时间 → 所用时间 → 评价人 → 关系角色 → 被评价人 → 职务 → 部门 → 项目，
+// 即「先定位这次是谁评的，再是评谁、被评价人的档案」。
 const (
-	colSeq       = 1 // 序号
-	colSubmitted = 2 // 提交时间
-	colDuration  = 3 // 所用时间
-	colRole      = 4 // 关系角色
-	colEvaluatee = 5 // 被评价对象
-	// 第 6 列起为题目列（一题一列）。
-	questionColStart = 6
+	colSeq         = 1 // 序号
+	colSubmitted   = 2 // 提交时间
+	colDuration    = 3 // 所用时间
+	colEvaluator   = 4 // 评价人（评价者姓名，列头用「评价人」）
+	colRole        = 5 // 关系角色
+	colEvaluatee   = 6 // 被评价人
+	colJobTitle    = 7 // 被评估人职务
+	colDepartment  = 8 // 被评估人部门
+	colWorkProject = 9 // 项目（evaluatee.work_project）
+	// 第 10 列起为题目列（一题一列）。
+	questionColStart = 10
 )
 
 // ExportByAnswer 按答案导出：全部题原文；矩阵一题一列；选项级评语并入单元格【】包裹；开放题独立列；只导已提交。
@@ -80,21 +86,7 @@ func (s *serviceImpl) ExportByAnswer(ctx context.Context, questionnaireID int64)
 			continue
 		}
 		// 前导列。
-		if e := excelutil.SetCellValue(f, sheet, colSeq, row, i+1); e != nil {
-			return nil, e
-		}
-		if sub.SubmittedAt != nil {
-			if e := excelutil.SetCellValue(f, sheet, colSubmitted, row, sub.SubmittedAt.Format("2006-01-02 15:04:05")); e != nil {
-				return nil, e
-			}
-		}
-		if e := excelutil.SetCellValue(f, sheet, colDuration, row, fmt.Sprintf("%d秒", sub.DurationSeconds)); e != nil {
-			return nil, e
-		}
-		if e := excelutil.SetCellValue(f, sheet, colRole, row, bundle.roleNames[rel.RoleId]); e != nil {
-			return nil, e
-		}
-		if e := excelutil.SetCellValue(f, sheet, colEvaluatee, row, bundle.evalNames[rel.EvaluateeId]); e != nil {
+		if e := writeLeadCells(f, sheet, row, bundle, rel, sub, i+1); e != nil {
 			return nil, e
 		}
 		// 题目列。
@@ -144,21 +136,7 @@ func (s *serviceImpl) ExportByScore(ctx context.Context, questionnaireID int64) 
 			continue
 		}
 		// 前导列（同按答案表）。
-		if e := excelutil.SetCellValue(f, sheet, colSeq, row, i+1); e != nil {
-			return nil, e
-		}
-		if sub.SubmittedAt != nil {
-			if e := excelutil.SetCellValue(f, sheet, colSubmitted, row, sub.SubmittedAt.Format("2006-01-02 15:04:05")); e != nil {
-				return nil, e
-			}
-		}
-		if e := excelutil.SetCellValue(f, sheet, colDuration, row, fmt.Sprintf("%d秒", sub.DurationSeconds)); e != nil {
-			return nil, e
-		}
-		if e := excelutil.SetCellValue(f, sheet, colRole, row, bundle.roleNames[rel.RoleId]); e != nil {
-			return nil, e
-		}
-		if e := excelutil.SetCellValue(f, sheet, colEvaluatee, row, bundle.evalNames[rel.EvaluateeId]); e != nil {
+		if e := writeLeadCells(f, sheet, row, bundle, rel, sub, i+1); e != nil {
 			return nil, e
 		}
 		// 计分题列：有效分值写数字单元格；0 分（无法评价）、未作答一律不写，保持空单元格。
@@ -181,9 +159,46 @@ func (s *serviceImpl) ExportByScore(ctx context.Context, questionnaireID int64) 
 	return buf.Bytes(), nil
 }
 
-// leadHeaders 返回固定前导列（不含评价者，见 FB-23）。
+// leadHeaders 返回固定前导列（两张表一致）。
+// 「评价人」列头用「评价人」，其字段仍是评价关系的评价者（relation.evaluator_emp_id）。
 func leadHeaders() []string {
-	return []string{"序号", "提交时间", "所用时间", "关系角色", "被评价对象"}
+	return []string{"序号", "提交时间", "所用时间", "评价人", "关系角色", "被评价人", "被评估人职务", "被评估人部门", "项目"}
+}
+
+// writeLeadCells 写入一行固定前导列，两张导出表共用同一口径。
+// seq 为该行序号；被评估人职务/部门/项目未录入时写空串，评价者姓名缺失（empcap 未就绪）同样留空；
+// 未提交时间不写单元格，保持真正的空单元格。
+func writeLeadCells(f *excelize.File, sheet string, row int, b *exportBundle, rel *entitymodel.Relation, sub *entitymodel.Submission, seq int) error {
+	var name, jobTitle, department, workProject string
+	if info := b.evalInfos[rel.EvaluateeId]; info != nil {
+		name, jobTitle, department, workProject = info.name, info.jobTitle, info.department, info.workProject
+	}
+	if e := excelutil.SetCellValue(f, sheet, colSeq, row, seq); e != nil {
+		return e
+	}
+	if sub.SubmittedAt != nil {
+		if e := excelutil.SetCellValue(f, sheet, colSubmitted, row, sub.SubmittedAt.Format("2006-01-02 15:04:05")); e != nil {
+			return e
+		}
+	}
+	cells := []struct {
+		col   int
+		value string
+	}{
+		{colDuration, fmt.Sprintf("%d秒", sub.DurationSeconds)},
+		{colEvaluator, b.evaluatorNames[rel.EvaluatorEmpId]},
+		{colRole, b.roleNames[rel.RoleId]},
+		{colEvaluatee, name},
+		{colJobTitle, jobTitle},
+		{colDepartment, department},
+		{colWorkProject, workProject},
+	}
+	for _, c := range cells {
+		if e := excelutil.SetCellValue(f, sheet, c.col, row, c.value); e != nil {
+			return e
+		}
+	}
+	return nil
 }
 
 // exportColumns 按维度、题目顺序返回导出题目列（一题一列）。

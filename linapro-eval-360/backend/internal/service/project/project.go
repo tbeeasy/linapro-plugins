@@ -139,6 +139,7 @@ type QuestionnaireCard struct {
 	Published      int        `json:"published"`
 	Sort           int        `json:"sort"`
 	EvaluateeCount int        `json:"evaluateeCount"`
+	EvaluatorCount int        `json:"evaluatorCount"` // 去重后的评价者人数
 	Completed      int        `json:"completed"`
 	Expected       int        `json:"expected"`
 	CreatedAt      *time.Time `json:"createdAt"`

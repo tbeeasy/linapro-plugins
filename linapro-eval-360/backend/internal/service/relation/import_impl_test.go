@@ -165,7 +165,7 @@ func seedHomonym(t *testing.T, ctx context.Context, tenantID int, name string, d
 		}
 	})
 	if departed {
-		if err = empSvc.MarkDeparted(ctx, tenantID, empID); err != nil {
+		if err = empSvc.MarkDeparted(ctx, tenantID, empID, ""); err != nil {
 			t.Fatalf("置同名员工离职失败：%v", err)
 		}
 	}

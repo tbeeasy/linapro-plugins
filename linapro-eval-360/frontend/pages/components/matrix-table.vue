@@ -6,7 +6,7 @@
 // 面板本身不修改数据，一律 emit 给父级改草稿，保持「只改草稿、随题目保存落库」的口径。
 import { ref } from 'vue';
 
-import { IconifyIcon } from '@vben/icons';
+import { Ellipsis } from '@vben/icons';
 import { Dropdown, Menu, MenuDivider, MenuItem, Radio } from 'ant-design-vue';
 
 import { $t } from '#/locales';
@@ -159,7 +159,9 @@ function closeThen(action: () => void) {
                   :data-testid="`eval360-matrix-col-menu-${i}`"
                   :title="$t('plugin.linapro-eval-360.page.questionnaire.columnActions')"
                 >
-                  <IconifyIcon icon="lucide:ellipsis-vertical" class="size-[18px]" />
+                  <!-- 用 @vben/icons 随包打包的 lucide 组件（横向省略号旋转 90° 即竖向「⋮」）：
+                       IconifyIcon 运行时要从 iconify 公网 API 拉 SVG，内网/飞书内置浏览器等访问不到时只剩 hover 底色。 -->
+                  <Ellipsis class="size-[18px] rotate-90" />
                 </button>
                 <template #overlay>
                   <Menu :selectable="true" :selected-keys="selectedKeys(c)">

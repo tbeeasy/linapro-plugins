@@ -12,8 +12,9 @@
 //   - 卡片模板按推送应用区分：模板须授权给实际发送的推送应用、跨企业不可复用，故每个
 //     参与投递的推送应用都必须在 card_templates 中单独配置，无全局兜底。
 //   - 链接按企业区分：dynamic_evaluation_url 在 todo_h5_url 上追加
-//     larkAppId=<该推送应用的 identity_app_id>。员工端登录页按它选用对应企业的
-//     **身份应用**换票（推送应用不参与登录），故不能填推送应用自身的 app_id。
+//     larkAppId=<该推送应用自身的 app_id>。网页应用能力开在推送应用上，员工端用它取 code，
+//     它在 linapro-employee-core 的 lark_apps 中登记为免登应用（identity_app_id 指向本企业
+//     身份应用），登录按身份应用查员工；身份应用不被 360 占用。
 //   - 双发可接受：同一评价者在两个企业都有身份时会各收到一张卡，本期不去重。
 //   - 按问卷判定送达：先对全部待发布问卷的评价者并集经 lark-push 干跑一次（只寻址与构造卡片、
 //     不调飞书），有评价者不可达的问卷判为不可达失败、其评价者不因它发卡；只向干跑通过问卷的
@@ -69,13 +70,19 @@ const (
 	larkAppIDQueryKey = "larkAppId"
 )
 
-// 飞书 AppLink「在飞书中打开网页」协议：卡片链接经它包装后由飞书客户端内置浏览器
-// 打开（而非系统浏览器），员工端才能复用飞书登录态完成免登。需飞书 7.5 及以上版本。
+// 飞书 AppLink 卡片跳转协议：卡片链接固定经「打开网页应用」包装，由飞书客户端以网页应用形态打开。
+// 员工端只支持在飞书内经 H5 JSAPI 原地免登（tt.requestAuthCode），不提供独立窗口或系统浏览器
+// 的回退形态，故每个企业的推送应用都须在飞书后台开通网页应用能力（应用主页 + H5 可信域名、
+// 重定向 URL、「获取用户 user ID」权限），否则该企业的卡片打不开或免登失败。
 const (
-	// larkWebURLAppLink 是 AppLink 打开网页的协议地址。
-	larkWebURLAppLink = "https://applink.feishu.cn/client/web_url/open"
-	// appLinkModeWindow 表示在飞书独立窗口中打开（问卷内容多，侧边栏过窄）。
-	appLinkModeWindow = "window"
+	// larkWebAppOpenAppLink 是 AppLink 打开「网页应用」的协议地址（应用维度，带飞书应用身份）。
+	// 不传 mode 时落在飞书导航栏标签页：切会话不销毁、常驻左侧可回，员工可边填边回消息。
+	larkWebAppOpenAppLink = "https://applink.feishu.cn/client/web_app/open"
+	// larkWebAppIDQueryKey 是 web_app/open 的应用 id 参数名（取值为发送该卡片的推送应用 app_id）。
+	larkWebAppIDQueryKey = "appId"
+	// larkWebAppTargetURLQueryKey 是 web_app/open 携带目标 URL 的参数名。用它而非 path：
+	// 待办链接是 hash 路由（#/eval-360/emp/todo），path 只拼接在应用主页之后、带不进 # 段。
+	larkWebAppTargetURLQueryKey = "lk_target_url"
 )
 
 // Sender 是一键发送的推送编排实现（实现 project.Sender）。

@@ -1,13 +1,23 @@
 <script setup lang="ts">
 // project-detail.vue 360 测评项目详情：
 // 顶部概览卡（起止时间 / 状态 / 4 项统计合并为一张卡）→ 问卷分页列表（VxeGrid）。
-// 问卷列表走后端分页接口（questionnairePage），列表行直接承载维护操作
-// （进入问卷/进入关系/重命名/发布-取消/复制/删除）；顶部统计卡仍读项目详情的全量聚合。
+// 问卷列表走后端分页接口（questionnairePage），列表行的维护操作
+// （进入问卷/进入关系/重命名/发布-取消/复制/删除）收纳在「更多操作」下拉中；
+// 顶部统计卡仍读项目详情的全量聚合。
 // 「发送全部问卷」与「新增问卷」并列放在列表工具栏。
 import { computed, onMounted, ref } from 'vue';
 
-import { preferences } from '@vben/preferences';
-import { Card, Divider, Input, message, Modal, Tag } from 'ant-design-vue';
+import {
+  Card,
+  Divider,
+  Dropdown,
+  Input,
+  Menu,
+  MenuItem,
+  message,
+  Modal,
+  Tag,
+} from 'ant-design-vue';
 
 import { useVbenVxeGrid } from '#/adapter/vxe-table';
 import { $t } from '#/locales';
@@ -157,6 +167,11 @@ const [Grid, gridApi] = useVbenVxeGrid({
         width: 110,
       },
       {
+        field: 'evaluatorCount',
+        title: $t('plugin.linapro-eval-360.page.questionnaire.colEvaluator'),
+        width: 110,
+      },
+      {
         field: 'progress',
         title: $t('plugin.linapro-eval-360.page.questionnaire.colProgress'),
         width: 100,
@@ -172,10 +187,9 @@ const [Grid, gridApi] = useVbenVxeGrid({
       {
         field: 'action',
         title: $t('plugin.linapro-eval-360.page.questionnaire.colActions'),
-        // 6 个按钮单行排布（含「取消发布」时最宽），英文文案更长需按语言放宽。
-        width: preferences.app.locale === 'en-US' ? 600 : 480,
+        // 只放一个「更多操作」下拉按钮，英文文案也能单行放下。
+        width: 130,
         fixed: 'right',
-        align: 'left',
         slots: { default: 'action' },
       },
     ],
@@ -494,44 +508,46 @@ async function handleSend() {
 
         <template #progress="{ row }">{{ qPercent(row) }}%</template>
 
+        <!-- 维护操作统一收纳在「更多操作」下拉；菜单项不区分颜色，危险操作靠二次确认把关。 -->
         <template #action="{ row }">
-          <div class="flex flex-nowrap items-center gap-1.5">
-            <a-button
-              size="small"
-              type="primary"
-              ghost
-              data-testid="eval360-questionnaire-open"
-              @click="emit('openQuestionnaire', row.id, 'questionnaire')"
-            >
-              {{ $t('plugin.linapro-eval-360.page.tab.questionnaire') }}
+          <Dropdown placement="bottomRight">
+            <template #overlay>
+              <Menu>
+                <MenuItem
+                  key="questionnaire"
+                  data-testid="eval360-questionnaire-open"
+                  @click="emit('openQuestionnaire', row.id, 'questionnaire')"
+                >
+                  {{ $t('plugin.linapro-eval-360.page.tab.questionnaire') }}
+                </MenuItem>
+                <MenuItem
+                  key="relation"
+                  @click="emit('openQuestionnaire', row.id, 'relation')"
+                >
+                  {{ $t('plugin.linapro-eval-360.page.tab.relation') }}
+                </MenuItem>
+                <MenuItem key="rename" @click="startRename(row)">
+                  {{ $t('plugin.linapro-eval-360.page.common.rename') }}
+                </MenuItem>
+                <MenuItem key="publish" @click="handlePublishToggle(row)">
+                  {{
+                    row.published === 1
+                      ? $t('plugin.linapro-eval-360.page.questionnaire.unpublish')
+                      : $t('plugin.linapro-eval-360.page.questionnaire.publish')
+                  }}
+                </MenuItem>
+                <MenuItem key="copy" @click="handleCopy(row)">
+                  {{ $t('plugin.linapro-eval-360.page.questionnaire.copy') }}
+                </MenuItem>
+                <MenuItem key="delete" @click="handleDelete(row)">
+                  {{ $t('plugin.linapro-eval-360.page.common.delete') }}
+                </MenuItem>
+              </Menu>
+            </template>
+            <a-button size="small" data-testid="eval360-questionnaire-more">
+              {{ $t('plugin.linapro-eval-360.page.questionnaire.moreActions') }}
             </a-button>
-            <a-button
-              size="small"
-              @click="emit('openQuestionnaire', row.id, 'relation')"
-            >
-              {{ $t('plugin.linapro-eval-360.page.tab.relation') }}
-            </a-button>
-            <a-button size="small" @click="startRename(row)">
-              {{ $t('plugin.linapro-eval-360.page.common.rename') }}
-            </a-button>
-            <a-button
-              size="small"
-              :type="row.published === 1 ? 'default' : 'primary'"
-              @click="handlePublishToggle(row)"
-            >
-              {{
-                row.published === 1
-                  ? $t('plugin.linapro-eval-360.page.questionnaire.unpublish')
-                  : $t('plugin.linapro-eval-360.page.questionnaire.publish')
-              }}
-            </a-button>
-            <a-button size="small" @click="handleCopy(row)">
-              {{ $t('plugin.linapro-eval-360.page.questionnaire.copy') }}
-            </a-button>
-            <a-button size="small" danger @click="handleDelete(row)">
-              {{ $t('plugin.linapro-eval-360.page.common.delete') }}
-            </a-button>
-          </div>
+          </Dropdown>
         </template>
       </Grid>
     </div>

@@ -52,6 +52,7 @@ type QuestionnaireCard struct {
 	Published      int    `json:"published" dc:"发布状态：0=未发布|1=已发布" eg:"1"`
 	Sort           int    `json:"sort" dc:"排序" eg:"1"`
 	EvaluateeCount int    `json:"evaluateeCount" dc:"被评估人数" eg:"5"`
+	EvaluatorCount int    `json:"evaluatorCount" dc:"Number of distinct evaluators in this questionnaire's evaluation relations; an evaluator who rates several evaluatees is counted once" eg:"4"`
 	Completed      int    `json:"completed" dc:"已填评价关系数" eg:"3"`
 	Expected       int    `json:"expected" dc:"应填评价关系数" eg:"8"`
 	CreatedAt      *int64 `json:"createdAt" dc:"创建时间（Unix timestamp in milliseconds）" eg:"1717200000000"`

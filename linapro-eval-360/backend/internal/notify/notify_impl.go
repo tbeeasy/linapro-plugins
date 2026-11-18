@@ -2,9 +2,9 @@
 //
 // 推送单元 = 评价者（一人一卡）。寻址、推送应用凭据与跨企业扇出交给 linapro-lark-push
 // （larkpushcap.SendCard）：本插件只给工号与卡片构造函数。卡片为飞书模板卡片：变量
-// name=评价者姓名、dynamic_evaluation_url=带该企业身份应用 larkAppId 参数的「我的待办」
-// H5 链接（员工端登录页据此选用身份应用换票），并经飞书 AppLink 包装为在飞书内置浏览器中
-// 打开（系统浏览器无飞书登录态、无法免登）。任一企业投递成功即视为已触达。
+// name=评价者姓名、dynamic_evaluation_url=带该推送应用 larkAppId 参数的「我的待办」
+// H5 链接（员工端登录页据此选用该应用取 code 换票），并经飞书 AppLink web_app/open 包装为在该推送
+// 应用的网页应用容器内打开（员工端只在该容器内经 JSAPI 免登）。任一企业投递成功即视为已触达。
 //
 // 发布按问卷判定（调用方只发布结果中未出现的问卷）：对全部待发布问卷的评价者并集经 lark-push
 // 干跑一次（只寻址与构造卡片、不调飞书），有评价者不可达的问卷记为不可达失败；只向干跑通过
@@ -152,7 +152,7 @@ func (s *senderImpl) loadCardTemplate(ctx context.Context) (cardTemplate, error)
 		err  error
 	)
 	if card.todoURL, err = s.hostConfig.String(ctx, todoH5URLConfigKey, ""); err != nil {
-		return cardTemplate{}, gerror.Wrap(err, "eval-360 notify: read todo H5 URL config failed")
+		return cardTemplate{}, gerror.Wrap(err, "eval-360 notify: 读取待办 H5 链接配置失败")
 	}
 	if card.appTemplates, err = s.loadAppCardTemplates(ctx); err != nil {
 		return cardTemplate{}, err
@@ -203,10 +203,10 @@ func (s *senderImpl) loadAppCardTemplates(ctx context.Context) (map[string]cardT
 func withLarkAppID(rawURL, appID string) (string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return "", gerror.Wrapf(err, "eval-360 notify: todo H5 URL is not parseable: %s", rawURL)
+		return "", gerror.Wrapf(err, "eval-360 notify: 待办 H5 链接无法解析：%s", rawURL)
 	}
 	if u.Scheme == "" || u.Host == "" {
-		return "", gerror.Newf("eval-360 notify: todo H5 URL must be absolute with scheme and host: %s", rawURL)
+		return "", gerror.Newf("eval-360 notify: 待办 H5 链接必须为带 scheme 与 host 的绝对地址：%s", rawURL)
 	}
 	if appID == "" {
 		return rawURL, nil
@@ -215,7 +215,7 @@ func withLarkAppID(rawURL, appID string) (string, error) {
 		routePath, routeQuery, _ := strings.Cut(u.Fragment, "?")
 		query, qErr := url.ParseQuery(routeQuery)
 		if qErr != nil {
-			return "", gerror.Wrapf(qErr, "eval-360 notify: todo H5 URL route query is not parseable: %s", rawURL)
+			return "", gerror.Wrapf(qErr, "eval-360 notify: 待办 H5 链接的路由查询参数无法解析：%s", rawURL)
 		}
 		query.Set(larkAppIDQueryKey, appID)
 		u.Fragment = routePath + "?" + query.Encode()
@@ -226,16 +226,6 @@ func withLarkAppID(rawURL, appID string) (string, error) {
 	query.Set(larkAppIDQueryKey, appID)
 	u.RawQuery = query.Encode()
 	return u.String(), nil
-}
-
-// wrapLarkAppLink 把目标链接包装为飞书 AppLink「在飞书中打开网页」地址（独立窗口模式），
-// 使卡片按钮在飞书内置浏览器中打开。目标链接整体作为 url 参数编码，其中的 #、&、? 不会
-// 被误当作 AppLink 自身的片段或参数分隔符。
-func wrapLarkAppLink(targetURL string) string {
-	query := url.Values{}
-	query.Set("mode", appLinkModeWindow)
-	query.Set("url", targetURL)
-	return larkWebURLAppLink + "?" + query.Encode()
 }
 
 // questionnaireEvaluators 是一份待发布问卷及其待评评价者（问卷内已去重）。
@@ -375,23 +365,36 @@ func (s *senderImpl) sendCards(
 	return res, err
 }
 
-// buildCard 为某推送应用构造评价者的模板卡片：取该推送应用的卡片模板，按其所属企业的
-// 身份应用生成带 larkAppId 的待办链接并包装为飞书 AppLink。员工端换票用的是身份应用，
-// 故 larkAppId 取 IdentityAppID 而不是推送应用自身的 AppID。该推送应用未配模板时返回
-// 错误（lark-push 记该条为失败；Precheck 正常情况下已在发布前拦截）。
+// buildCard 为某推送应用构造评价者的模板卡片：取该推送应用的卡片模板，生成带 larkAppId 的
+// 待办链接，并包装为网页应用 AppLink。larkAppId 与 web_app/open 的 appId 都取**推送应用自身**
+// 的 AppID：网页应用能力开在「360测评助手」推送应用上，员工端 tt.requestAuthCode 须用同一个
+// appId 取 code；该应用同时在 linapro-employee-core 的 lark_apps 里登记为免登应用，登录时按它的
+// identity_app_id 查员工。身份应用留给考勤等其他员工端，不被 360 占用。每张卡只带本企业的推送应用。
+// 推送应用未配模板时返回错误（lark-push 记该条为失败；Precheck 正常情况下已在发布前拦截）。
 func buildCard(card cardTemplate, app larkpushcap.PushApp, name string) (string, error) {
 	tpl, ok := card.entryFor(app.AppID)
 	if !ok {
 		return "", gerror.Newf("eval-360 notify: 推送应用 %s 未配置卡片模板", app.AppID)
 	}
-	todoURL, err := withLarkAppID(card.todoURL, app.IdentityAppID)
+	todoURL, err := withLarkAppID(card.todoURL, app.AppID)
 	if err != nil {
 		return "", err
 	}
 	return larkim.BuildTemplateCard(tpl.templateID, tpl.versionName, map[string]any{
 		cardVarName:          name,
-		cardVarEvaluationURL: wrapLarkAppLink(todoURL),
+		cardVarEvaluationURL: openTodoAppLink(app.AppID, todoURL),
 	})
+}
+
+// openTodoAppLink 把待办链接包装为飞书 AppLink web_app/open（应用维度）：不传 mode 即落在飞书
+// 导航栏标签页，切会话不销毁、左侧常驻，员工可边填边回消息。目标链接经 lk_target_url 携带（不用
+// path，因为 hash 路由的 #/ 段无法拼进应用主页之后的 path）。appID 须是该企业推送应用的 app_id，
+// 且该应用须已开通网页应用能力；员工端只在网页应用容器内能取到 h5sdk 完成免登。
+func openTodoAppLink(appID, targetURL string) string {
+	query := url.Values{}
+	query.Set(larkWebAppIDQueryKey, appID)
+	query.Set(larkWebAppTargetURLQueryKey, targetURL)
+	return larkWebAppOpenAppLink + "?" + query.Encode()
 }
 
 // listPushApps 经 lark-push 取本插件分组的推送应用清单；lark-push 未注入或未就绪映射为

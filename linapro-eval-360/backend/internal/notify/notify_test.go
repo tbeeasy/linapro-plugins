@@ -3,8 +3,8 @@
 // 推送逻辑的硬红线（见 design.md D4 / spec「推送寻址」「一键发送编排」）：
 //   - 投递只经 linapro-lark-push：本插件只给工号与卡片构造函数，不读任何飞书应用凭据；
 //   - 一评价者一张卡：同一评价者 N 条评价关系只作为一个收件人（不按关系深链）；
-//   - 卡片按推送应用构造：模板取该推送应用的 card_templates 项，链接 larkAppId 取
-//     该推送应用所属企业的身份应用（员工端换票用身份应用）；
+//   - 卡片按推送应用构造：模板取该推送应用的 card_templates 项，链接 larkAppId 与 web_app/open 的
+//     appId 都取该推送应用自身（网页应用开在推送应用上，员工端用它取 code，不用身份应用）；
 //   - 按问卷判定送达（FB-30 / FB-31）：全部问卷评价者并集只干跑一次（不调飞书），有评价者不可达的
 //     问卷记入 Unreachable；只向干跑通过问卷的评价者并集正式投递（每人一张卡，只属于不可达问卷的
 //     评价者不发卡），单条失败不中断，任一企业投递成功即视为触达，仍有评价者未送达的问卷记入
@@ -119,8 +119,8 @@ func (f *fakePusher) deliver(req larkpushcap.SendCardRequest, app larkpushcap.Pu
 	return d
 }
 
-// fakeHostConfig 满足 notify 需要的两个 hostconfigcap 方法子集（Get / String）。
-// 它嵌入 hostconfigcap.Service 以保留其余方法的 nil 兜底，只覆盖 Get 与 String。
+// fakeHostConfig 满足 notify 需要的三个 hostconfigcap 方法子集（Get / String / Bool）。
+// 它嵌入 hostconfigcap.Service 以保留其余方法的 nil 兜底，只覆盖 Get、String 与 Bool。
 type fakeHostConfig struct {
 	hostconfigcap.Service                      // 嵌入以满足接口其余方法（nil 兜底）
 	values                map[string]*gvar.Var // key → 预设值
@@ -139,6 +139,14 @@ func (f fakeHostConfig) String(ctx context.Context, key, def string) (string, er
 		return def, err
 	}
 	return v.String(), nil
+}
+
+func (f fakeHostConfig) Bool(ctx context.Context, key string, def bool) (bool, error) {
+	v, err := f.Get(ctx, key, def)
+	if err != nil || v == nil {
+		return def, err
+	}
+	return v.Bool(), nil
 }
 
 // twoPushApps 是两企业各一个推送应用（identity_app_id 指向各企业的身份应用）。
@@ -255,7 +263,9 @@ func bizerrItem(t *testing.T, err error) string {
 
 // TestPushEvaluators_DryRunThenSend: 评价者以工号作为收件人交给 lark-push，一人一个收件人；
 // 先干跑（DryRun=true、不发出）再正式投递，全员送达时结果为空（问卷通过）。每张卡用该推送应用的
-// 模板、链接 larkAppId 取该企业身份应用（不是推送应用 ID）、name 为评价者姓名。
+// 模板、name 为评价者姓名；链接为 web_app/open，appId 与链接内 larkAppId 都是**发送该卡片的推送应用**
+// 自身（网页应用能力开在推送应用上，不是身份应用）——霍尔果斯的卡片带 cli_push_a、星嘉的卡片带
+// cli_push_b，不得出现身份应用 cli_a / cli_b，也不得出现一个企业的卡片带另一个企业的自建应用。
 func TestPushEvaluators_DryRunThenSend(t *testing.T) {
 	pusher := &fakePusher{
 		apps: twoPushApps,
@@ -288,24 +298,35 @@ func TestPushEvaluators_DryRunThenSend(t *testing.T) {
 	if len(pusher.sent) != 3 {
 		t.Fatalf("E001 两企业各一张（双发可接受）+ E002 一张, got %+v", pusher.sent)
 	}
-	identityByPushApp := map[string]string{"cli_push_a": "cli_a", "cli_push_b": "cli_b"}
 	nameByNo := map[string]string{"E001": "张三", "E002": "李四"}
+	seenWebAppIDs := map[string]bool{}
 	for _, sc := range pusher.sent {
 		got := decodeCard(t, sc.cardJSON)
 		wantTpl := testCard.appTemplates[sc.pushAppID]
 		if got.Data.TemplateID != wantTpl.templateID || got.Data.TemplateVersionName != wantTpl.versionName {
 			t.Fatalf("%s 模板 ID/版本不符: %+v", sc.pushAppID, got.Data)
 		}
-		identity := identityByPushApp[sc.pushAppID]
-		wantURL := wrapLarkAppLink("https://emp.example.com/eval-360/emp/todo?larkAppId=" + identity)
-		if got.Data.TemplateVariable[cardVarEvaluationURL] != wantURL {
-			t.Fatalf("%s 链接应携带身份应用 %s: want %s, got %s",
-				sc.pushAppID, identity, wantURL, got.Data.TemplateVariable[cardVarEvaluationURL])
+		todoURL := "https://emp.example.com/eval-360/emp/todo?larkAppId=" + sc.pushAppID
+		gotURL := got.Data.TemplateVariable[cardVarEvaluationURL]
+		if wantURL := openTodoAppLink(sc.pushAppID, todoURL); gotURL != wantURL {
+			t.Fatalf("%s 链接应携带推送应用自身 larkAppId: want %s, got %s", sc.pushAppID, wantURL, gotURL)
 		}
+		link, perr := url.Parse(gotURL)
+		if perr != nil {
+			t.Fatalf("%s 链接不可解析: %v", sc.pushAppID, perr)
+		}
+		gotAppID := link.Query().Get(larkWebAppIDQueryKey)
+		if gotAppID != sc.pushAppID {
+			t.Fatalf("%s 的卡片 web_app/open appId 应为推送应用自身, got %s", sc.pushAppID, gotAppID)
+		}
+		seenWebAppIDs[gotAppID] = true
 		if got.Data.TemplateVariable[cardVarName] != nameByNo[sc.employeeNo] {
 			t.Fatalf("%s/%s name want %s, got %s", sc.pushAppID, sc.employeeNo,
 				nameByNo[sc.employeeNo], got.Data.TemplateVariable[cardVarName])
 		}
+	}
+	if !seenWebAppIDs["cli_push_a"] || !seenWebAppIDs["cli_push_b"] || len(seenWebAppIDs) != 2 {
+		t.Fatalf("两个企业的卡片应分别带各自推送应用 appId（不得出现身份应用）, got %v", seenWebAppIDs)
 	}
 }
 
@@ -559,30 +580,61 @@ func TestSendAll_EmpcapUnboundFailsClosed(t *testing.T) {
 	}
 }
 
-// TestWrapLarkAppLink 覆盖 AppLink 包装：协议地址与独立窗口模式固定，hash 路由链接中的
-// #、?、& 整体编码进 url 参数（不被当作 AppLink 自身的分隔符），解码后与原链接完全一致。
-func TestWrapLarkAppLink(t *testing.T) {
-	target := "https://h.example.com/admin/#/eval-360/emp/todo?larkAppId=cli_a&y=2"
-	got := wrapLarkAppLink(target)
+// TestOpenTodoAppLink 覆盖卡片跳转链接：走 web_app/open（应用维度、不传 mode 即飞书导航栏
+// 标签页，appId 与目标链接内 larkAppId 是同一个推送应用，目标链接经 lk_target_url 整体编码，
+// hash 路由的 #/ 段与 & 参数得以保留、不泄漏到 AppLink 自身参数）。
+func TestOpenTodoAppLink(t *testing.T) {
+	target := "https://h.example.com/admin/#/eval-360/emp/todo?larkAppId=cli_push_a&y=2"
+
+	got := openTodoAppLink("cli_push_a", target)
 	u, err := url.Parse(got)
 	if err != nil {
 		t.Fatalf("AppLink 不可解析: %v", err)
 	}
-	if base := u.Scheme + "://" + u.Host + u.Path; base != larkWebURLAppLink {
-		t.Fatalf("协议地址 want %s, got %s", larkWebURLAppLink, base)
+	if base := u.Scheme + "://" + u.Host + u.Path; base != larkWebAppOpenAppLink {
+		t.Fatalf("协议地址 want %s, got %s", larkWebAppOpenAppLink, base)
+	}
+	query := u.Query()
+	if query.Get(larkWebAppIDQueryKey) != "cli_push_a" {
+		t.Fatalf("appId want cli_push_a（与链接内 larkAppId 同一推送应用）, got %s", query.Get(larkWebAppIDQueryKey))
+	}
+	if _, ok := query["mode"]; ok {
+		t.Fatalf("web_app/open 不应传 mode：不传才落在导航栏标签页, got %v", query)
 	}
 	if u.Fragment != "" {
 		t.Fatalf("目标链接的 # 未编码，被解析为 AppLink 片段: %s", u.Fragment)
 	}
-	query := u.Query()
-	if query.Get("mode") != appLinkModeWindow {
-		t.Fatalf("mode want %s, got %s", appLinkModeWindow, query.Get("mode"))
-	}
-	if query.Get("url") != target {
-		t.Fatalf("url 往返不一致: want %s, got %s", target, query.Get("url"))
+	if query.Get(larkWebAppTargetURLQueryKey) != target {
+		t.Fatalf("lk_target_url 往返不一致: want %s, got %s", target, query.Get(larkWebAppTargetURLQueryKey))
 	}
 	if len(query) != 2 {
 		t.Fatalf("目标链接的参数泄漏到 AppLink 参数: %v", query)
+	}
+}
+
+// TestBuildCard_UsesPushAppNotIdentityApp: 卡片 web_app/open 的 appId 与链接 larkAppId 都取推送应用
+// 自身，与推送应用登记的身份应用无关——真机 2602002 的成因是用身份应用 appId 取 code，而网页应用
+// 开在推送应用上。身份应用为空也照常构造（buildCard 不再依赖它）。
+func TestBuildCard_UsesPushAppNotIdentityApp(t *testing.T) {
+	for _, app := range []larkpushcap.PushApp{
+		{AppID: "cli_push_a", IdentityAppID: "cli_a"},
+		{AppID: "cli_push_a"},
+	} {
+		cardJSON, err := buildCard(testCard, app, "张三")
+		if err != nil {
+			t.Fatalf("%+v 构造卡片失败: %v", app, err)
+		}
+		link, err := url.Parse(decodeCard(t, cardJSON).Data.TemplateVariable[cardVarEvaluationURL])
+		if err != nil {
+			t.Fatalf("链接不可解析: %v", err)
+		}
+		if got := link.Query().Get(larkWebAppIDQueryKey); got != "cli_push_a" {
+			t.Fatalf("%+v：web_app/open appId want cli_push_a, got %s", app, got)
+		}
+		wantTarget := "https://emp.example.com/eval-360/emp/todo?larkAppId=cli_push_a"
+		if got := link.Query().Get(larkWebAppTargetURLQueryKey); got != wantTarget {
+			t.Fatalf("%+v：链接 larkAppId 应为推送应用, want %s, got %s", app, wantTarget, got)
+		}
 	}
 }
 

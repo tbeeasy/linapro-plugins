@@ -93,6 +93,48 @@ export class Eval360Page {
     await this.page.getByTestId('eval360-project-send').first().click();
   }
 
+  // ---- 项目详情问卷列表（VxeGrid） ----
+
+  // 主表中按问卷名定位行（右侧固定列另有一份行副本，不含问卷名）。
+  questionnaireRow(title: string): Locator {
+    return this.page
+      .locator('.vxe-table--main-wrapper .vxe-body--row')
+      .filter({ hasText: title })
+      .first();
+  }
+
+  // 按表头文案（精确匹配）取该问卷行的单元格。
+  async questionnaireCell(title: string, header: string): Promise<Locator> {
+    const th = this.page
+      .locator('.vxe-table--main-wrapper .vxe-header--column')
+      .filter({ hasText: new RegExp(`^\\s*${header}\\s*$`) })
+      .first();
+    await expect(th).toBeVisible();
+    const colid = await th.getAttribute('colid');
+    expect(colid, `缺少「${header}」列的 colid`).toBeTruthy();
+    return this.questionnaireRow(title).locator(`.vxe-body--column[colid="${colid}"]`);
+  }
+
+  // 「更多操作」按钮在右侧固定的操作列：按主表行的 rowid 取可见的那一份。
+  async questionnaireMoreButton(title: string): Promise<Locator> {
+    const row = this.questionnaireRow(title);
+    await expect(row).toBeVisible();
+    const rowid = await row.getAttribute('rowid');
+    return this.page
+      .locator(`.vxe-body--row[rowid="${rowid}"]`)
+      .getByTestId('eval360-questionnaire-more')
+      .filter({ visible: true })
+      .first();
+  }
+
+  // 悬停「更多操作」展开下拉菜单，返回可见的菜单浮层。
+  async openQuestionnaireMoreMenu(title: string): Promise<Locator> {
+    await (await this.questionnaireMoreButton(title)).hover();
+    const menu = this.page.locator('.ant-dropdown:not(.ant-dropdown-hidden) .ant-dropdown-menu');
+    await expect(menu).toBeVisible();
+    return menu;
+  }
+
   async openQuestionnaire(title: string) {
     await this.page
       .getByTestId('eval360-questionnaire-card')

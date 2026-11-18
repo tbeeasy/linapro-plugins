@@ -7,6 +7,7 @@
 //     两个工号列）忽略，故导出的 Excel 修改后可直接再导入。
 //   - 行级校验：姓名按 relation_resolve.go 规则解析为唯一在职员工（找不到或在职重名判行失败并点名）、
 //     角色名非空、被评估人≠评价者；职务/部门/项目可选，超长或同一被评估人多行取值冲突判行失败。
+//   - 文件内校验：同一被评估人下同一评价者不得出现在多行（同角色为重复、不同角色为跨角色），涉及的每一行都判失败。
 //   - 任一行校验失败 → 中止整批、回报行号与原因、不写入任何数据。
 //   - 全部通过后单事务 upsert 角色（归一化名称，默认权重 0）→ 被评估人 → 评价关系。
 package relation
@@ -16,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -206,6 +208,8 @@ func (s *serviceImpl) ImportRelations(ctx context.Context, in ImportInput) (*Imp
 		roleName    string
 	}
 	resolvedRows := make([]resolved, 0, len(rows))
+	// conflictEntries 收集通过逐行校验的行，供文件内重复/跨角色校验。
+	conflictEntries := make([]pairEntry, 0, len(rows))
 	// 被评估人 EmpID → 合并后的职务/部门/项目（同一被评估人多行取首个非空值）。
 	profiles := make(map[int64]evaluateeProfile)
 
@@ -268,6 +272,26 @@ func (s *serviceImpl) ImportRelations(ctx context.Context, in ImportInput) (*Imp
 		profiles[eeEmp.EmpID] = merged
 		resolvedRows = append(resolvedRows, resolved{
 			rowNum: r.rowNum, evaluateeID: eeEmp.EmpID, evaluatorID: evalEmp.EmpID, roleName: normRole,
+		})
+		conflictEntries = append(conflictEntries, pairEntry{
+			rowNum:        r.rowNum,
+			pair:          evaluatorPair{evaluateeEmpID: eeEmp.EmpID, evaluatorEmpID: evalEmp.EmpID},
+			evaluateeName: eeName,
+			evaluatorName: evalName,
+			roleName:      normRole,
+		})
+	}
+
+	// 同一被评估人下评价者不得重复、不得跨角色：全量导入为覆盖语义，只判文件内部，涉及的每一行都判失败。
+	if reasons := importConflictReasons(conflictEntries); len(reasons) > 0 {
+		for _, e := range conflictEntries {
+			if reason, ok := reasons[e.rowNum]; ok {
+				fail(e.rowNum, reason)
+			}
+		}
+		// 冲突行在逐行校验之后追加，按行号重排，便于对照 Excel。
+		sort.SliceStable(result.FailList, func(i, j int) bool {
+			return result.FailList[i].Row < result.FailList[j].Row
 		})
 	}
 

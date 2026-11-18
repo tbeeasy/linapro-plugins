@@ -4,6 +4,7 @@ package export
 
 import (
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 	"github.com/xuri/excelize/v2"
@@ -143,9 +144,9 @@ func TestAnswerCellText_MatrixWithComment(t *testing.T) {
 	}
 }
 
-// 前导列：不含「评价者」（FB-23），且题目列起点紧随前导列之后、无空列。
-func TestLeadHeaders_NoEvaluator(t *testing.T) {
-	want := []string{"序号", "提交时间", "所用时间", "关系角色", "被评价对象"}
+// 前导列：两表一致的 9 列（FB-6 新增评价人与被评估人档案三列），题目列起点紧随其后、无空列。
+func TestLeadHeaders_FixedColumns(t *testing.T) {
+	want := []string{"序号", "提交时间", "所用时间", "评价人", "关系角色", "被评价人", "被评估人职务", "被评估人部门", "项目"}
 	got := leadHeaders()
 	if len(got) != len(want) {
 		t.Fatalf("前导列应为 %v，got %v", want, got)
@@ -157,6 +158,57 @@ func TestLeadHeaders_NoEvaluator(t *testing.T) {
 	}
 	if questionColStart != len(got)+1 {
 		t.Fatalf("题目列应从紧随前导列的第 %d 列开始，got %d", len(got)+1, questionColStart)
+	}
+}
+
+// 前导列取值（FB-6）：评价人取评价关系上的评价者姓名，职务/部门/项目取被评估人档案，
+// 未录入与姓名缺失均写空串而不是漏列。
+func TestWriteLeadCells(t *testing.T) {
+	submittedAt := time.Date(2026, 11, 17, 9, 30, 0, 0, time.Local)
+	b := &exportBundle{
+		roleNames:      map[int64]string{3: "管理员"},
+		evalInfos:      map[int64]*evaluateeInfo{7: {name: "张三", jobTitle: "销售总监", department: "华东销售部", workProject: "星火项目"}},
+		evaluatorNames: map[int64]string{9002: "李四"},
+	}
+	cases := []struct {
+		name string
+		sub  *entitymodel.Submission
+		rel  *entitymodel.Relation
+		want []string
+	}{
+		{
+			name: "档案齐全",
+			sub:  &entitymodel.Submission{SubmittedAt: &submittedAt, DurationSeconds: 95},
+			rel:  &entitymodel.Relation{RoleId: 3, EvaluateeId: 7, EvaluatorEmpId: 9002},
+			want: []string{"1", "2026-11-17 09:30:00", "95秒", "李四", "管理员", "张三", "销售总监", "华东销售部", "星火项目"},
+		},
+		{
+			name: "档案与姓名缺失留空",
+			sub:  &entitymodel.Submission{DurationSeconds: 8},
+			rel:  &entitymodel.Relation{RoleId: 3, EvaluateeId: 8, EvaluatorEmpId: 9003},
+			want: []string{"2", "", "8秒", "", "管理员", "", "", "", ""},
+		},
+	}
+	f := excelize.NewFile()
+	t.Cleanup(func() {
+		if err := f.Close(); err != nil {
+			t.Errorf("关闭 Excel 失败: %v", err)
+		}
+	})
+	for i, c := range cases {
+		row := i + 1
+		if err := writeLeadCells(f, "Sheet1", row, b, c.rel, c.sub, row); err != nil {
+			t.Fatalf("%s: 写入失败: %v", c.name, err)
+		}
+		for offset, want := range c.want {
+			cell, err := excelize.CoordinatesToCellName(offset+1, row)
+			if err != nil {
+				t.Fatalf("%s: 构造单元格失败: %v", c.name, err)
+			}
+			if got, _ := f.GetCellValue("Sheet1", cell); got != want {
+				t.Fatalf("%s: 第 %d 列应为 %q，got %q", c.name, offset+1, want, got)
+			}
+		}
 	}
 }
 

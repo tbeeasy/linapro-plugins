@@ -59,12 +59,12 @@ func (s *serviceImpl) GetDetail(ctx context.Context, id int64) (*ProjectDetail, 
 		return nil, err
 	}
 
-	// 被评估人数与已填/应填关系数（按问卷聚合）。
+	// 被评估人数、评价人数与已填/应填关系数（按问卷聚合）。
 	qIDs := make([]int64, 0, len(qList))
 	for _, q := range qList {
 		qIDs = append(qIDs, q.Id)
 	}
-	evalCountByQ, completedByQ, expectedByQ, err := s.aggregateRelationStats(ctx, qIDs)
+	statsByQ, err := s.aggregateRelationStats(ctx, qIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -72,11 +72,13 @@ func (s *serviceImpl) GetDetail(ctx context.Context, id int64) (*ProjectDetail, 
 	cards := make([]*QuestionnaireCard, 0, len(qList))
 	var totalCompleted, totalExpected int
 	for _, q := range qList {
+		st := statsByQ[q.Id]
 		card := &QuestionnaireCard{
 			Id: q.Id, Title: q.Title, Published: q.Published, Sort: q.Sort,
-			EvaluateeCount: evalCountByQ[q.Id],
-			Completed:      completedByQ[q.Id],
-			Expected:       expectedByQ[q.Id],
+			EvaluateeCount: st.evaluatees,
+			EvaluatorCount: st.evaluators,
+			Completed:      st.completed,
+			Expected:       st.expected,
 			CreatedAt:      q.CreatedAt,
 		}
 		cards = append(cards, card)
@@ -93,7 +95,7 @@ func (s *serviceImpl) GetDetail(ctx context.Context, id int64) (*ProjectDetail, 
 }
 
 // PageQuestionnaires 分页返回项目下的问卷卡片：先经问卷服务分页取当页问卷，
-// 再按当页问卷 id 聚合被评估人数与已填/应填关系数，组装为含完成率的卡片。
+// 再按当页问卷 id 聚合被评估人数、评价人数与已填/应填关系数，组装为含完成率的卡片。
 func (s *serviceImpl) PageQuestionnaires(ctx context.Context, projectID int64, keyword string, pageNum, pageSize int) ([]*QuestionnaireCard, int, error) {
 	// 校验项目存在（租户过滤），避免跨租户分页。
 	if _, err := s.mustGetProject(ctx, projectID); err != nil {
@@ -109,45 +111,72 @@ func (s *serviceImpl) PageQuestionnaires(ctx context.Context, projectID int64, k
 	for _, q := range qList {
 		qIDs = append(qIDs, q.Id)
 	}
-	evalCountByQ, completedByQ, expectedByQ, err := s.aggregateRelationStats(ctx, qIDs)
+	statsByQ, err := s.aggregateRelationStats(ctx, qIDs)
 	if err != nil {
 		return nil, 0, err
 	}
 
 	cards := make([]*QuestionnaireCard, 0, len(qList))
 	for _, q := range qList {
+		st := statsByQ[q.Id]
 		cards = append(cards, &QuestionnaireCard{
 			Id: q.Id, Title: q.Title, Published: q.Published, Sort: q.Sort,
-			EvaluateeCount: evalCountByQ[q.Id],
-			Completed:      completedByQ[q.Id],
-			Expected:       expectedByQ[q.Id],
+			EvaluateeCount: st.evaluatees,
+			EvaluatorCount: st.evaluators,
+			Completed:      st.completed,
+			Expected:       st.expected,
 			CreatedAt:      q.CreatedAt,
 		})
 	}
 	return cards, total, nil
 }
 
-// aggregateRelationStats 按问卷聚合被评估人数与已填/应填关系数。
-func (s *serviceImpl) aggregateRelationStats(ctx context.Context, qIDs []int64) (evalCount, completed, expected map[int64]int, err error) {
-	evalCount = make(map[int64]int)
-	completed = make(map[int64]int)
-	expected = make(map[int64]int)
+// questionnaireStats 是单份问卷的人数与关系数聚合结果。
+type questionnaireStats struct {
+	evaluatees int // 被评估人数
+	evaluators int // 评价人数（去重后的评价者 EmpID 数）
+	completed  int // 已填关系数
+	expected   int // 应填关系数
+}
+
+// aggregateRelationStats 按问卷批量聚合被评估人数、评价人数与已填/应填关系数；
+// 未出现在结果中的问卷各项均为 0。
+func (s *serviceImpl) aggregateRelationStats(ctx context.Context, qIDs []int64) (map[int64]questionnaireStats, error) {
+	stats := make(map[int64]questionnaireStats, len(qIDs))
 	if len(qIDs) == 0 {
-		return evalCount, completed, expected, nil
+		return stats, nil
 	}
 	// 被评估人数。
 	var evalRows []struct {
 		QuestionnaireId int64 `orm:"questionnaire_id"`
 		Cnt             int   `orm:"cnt"`
 	}
-	if err = dao.Evaluatee.Ctx(ctx).
+	if err := dao.Evaluatee.Ctx(ctx).
 		WhereIn(dao.Evaluatee.Columns().QuestionnaireId, qIDs).
 		Fields("questionnaire_id, count(*) as cnt").
 		Group("questionnaire_id").Scan(&evalRows); err != nil {
-		return evalCount, completed, expected, err
+		return nil, err
 	}
 	for _, r := range evalRows {
-		evalCount[r.QuestionnaireId] = r.Cnt
+		st := stats[r.QuestionnaireId]
+		st.evaluatees = r.Cnt
+		stats[r.QuestionnaireId] = st
+	}
+	// 评价人数：同一评价者评价多名被评估人只计一次。
+	var evaluatorRows []struct {
+		QuestionnaireId int64 `orm:"questionnaire_id"`
+		Cnt             int   `orm:"cnt"`
+	}
+	if err := dao.Relation.Ctx(ctx).
+		WhereIn(dao.Relation.Columns().QuestionnaireId, qIDs).
+		Fields("questionnaire_id, count(distinct evaluator_emp_id) as cnt").
+		Group("questionnaire_id").Scan(&evaluatorRows); err != nil {
+		return nil, err
+	}
+	for _, r := range evaluatorRows {
+		st := stats[r.QuestionnaireId]
+		st.evaluators = r.Cnt
+		stats[r.QuestionnaireId] = st
 	}
 	// 关系数（已填 / 应填）。
 	var relRows []struct {
@@ -155,19 +184,21 @@ func (s *serviceImpl) aggregateRelationStats(ctx context.Context, qIDs []int64) 
 		Completed       int   `orm:"completed"`
 		Cnt             int   `orm:"cnt"`
 	}
-	if err = dao.Relation.Ctx(ctx).
+	if err := dao.Relation.Ctx(ctx).
 		WhereIn(dao.Relation.Columns().QuestionnaireId, qIDs).
 		Fields("questionnaire_id, completed, count(*) as cnt").
 		Group("questionnaire_id, completed").Scan(&relRows); err != nil {
-		return evalCount, completed, expected, err
+		return nil, err
 	}
 	for _, r := range relRows {
-		expected[r.QuestionnaireId] += r.Cnt
+		st := stats[r.QuestionnaireId]
+		st.expected += r.Cnt
 		if r.Completed == 1 {
-			completed[r.QuestionnaireId] += r.Cnt
+			st.completed += r.Cnt
 		}
+		stats[r.QuestionnaireId] = st
 	}
-	return evalCount, completed, expected, nil
+	return stats, nil
 }
 
 // Create 新建项目。状态派生为草稿（无已发布问卷）。

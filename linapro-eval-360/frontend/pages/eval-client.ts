@@ -40,6 +40,7 @@ export interface QuestionnaireCard {
   published: number; // 0/1
   sort: number;
   evaluateeCount: number;
+  evaluatorCount: number; // 去重后的评价者人数
   completed: number;
   expected: number;
   createdAt: null | number; // Unix 毫秒时间戳

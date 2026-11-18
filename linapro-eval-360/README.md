@@ -60,11 +60,17 @@ two HR-facing detail exports (by answer / by score).
     each reopen, no server-side pause); `duration_seconds` stored verbatim.
 - **Lark push** — one Feishu **template card** per evaluator (template variables
   `name` = evaluator name, `dynamic_evaluation_url` = "My Assessments" H5 with
-  `larkAppId=<the enterprise's identity app>` appended; no deep link). The link is
-  wrapped in a Feishu AppLink (`applink.feishu.cn/client/web_url/open?mode=window`)
-  so it opens in a standalone window of Feishu's in-app browser, whose Feishu
-  session makes login silent (Feishu 7.5+). The employee login page uses that
-  `larkAppId` to pick the enterprise's identity app for the code exchange.
+  `larkAppId=<the push app's own app_id>` appended; no deep link). The link
+  is always wrapped in a Feishu AppLink `applink.feishu.cn/client/web_app/open`
+  (no `mode`, target carried in `lk_target_url`) and opens in a Feishu navigation
+  bar tab that survives switching chats; its `appId` is the **same push app**
+  (the "360 Assessment Assistant" that sends the card) as the link's `larkAppId`,
+  generated per enterprise, so a card never carries another enterprise's app.
+  The employee side then signs in silently inside Feishu via the H5 JSAPI
+  `tt.requestAuthCode` with that `larkAppId` (no full-page OAuth redirect); the
+  push app is registered as a login app in `linapro-employee-core.lark_apps`, so
+  login resolves the employee through the enterprise's identity app. The identity
+  app itself is not used by 360.
   One-click send and single-questionnaire publish both refuse to publish when the
   card configuration below is missing. Delivery goes through
   **`linapro-lark-push`**: this plugin only hands over evaluator employee numbers
@@ -127,9 +133,20 @@ An unconfigured group, or any entry in it with empty credentials (lark-push then
 treats this group as invalid), blocks publishing. Other plugins' groups do not
 affect this one.
 
-Each enterprise's **identity app** (`linapro-employee-core.lark_apps`) redirect URL allowlist must contain the employee login page
-URL without query, e.g. `https://host/admin/#/eval-360/emp/login` (hash router)
-or `https://host/admin/eval-360/emp/login` (history router).
+Cards always open as a Feishu web app with `appId` = the push app that sends the card,
+so **every push app** in this group must have the web app capability enabled
+(app home page + H5 trusted domain) and the "Obtain user ID" permission, and must be
+registered as a login app in `linapro-employee-core.lark_apps` (with
+`identity_app_id` = that enterprise's identity app); otherwise that enterprise's
+cards cannot be opened or sign-in fails.
+
+Employee sign-in uses the Feishu H5 JSAPI `tt.requestAuthCode`, which requires the
+calling page URL (without `?` and `#` parts) to be in each enterprise's **push
+app** "Security settings → Redirect URLs"
+(error 10236 otherwise). With the production hash router this is the workspace
+base, e.g. `https://host/admin/`. The page domain must also be an H5 trusted
+domain of that app. Outside Feishu the employee side shows "Open in Feishu" and
+never starts any authorization.
 
 ## Auth / multi-tenancy
 

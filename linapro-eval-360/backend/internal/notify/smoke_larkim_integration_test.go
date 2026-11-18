@@ -10,13 +10,14 @@
 //	go test -tags=integration -run TestLarkimSmokeSendCard -v \
 //	  ./apps/lina-plugins/linapro-eval-360/backend/internal/notify/... \
 //	  -args -lark_push_app_id=cli_xxx -lark_push_app_secret=xxx \
-//	  -lark_identity_app_id=cli_yyy -lark_user_id=xxx \
+//	  -lark_user_id=xxx \
 //	  -lark_card_template_id=AAqxxx -lark_card_template_version=1.0.0 \
 //	  -todo_h5_url='https://host/admin/#/eval-360/emp/todo'
 //
 // 前置（部署方/开发手动准备，本测试不自动满足）：
 //   - 推送应用已开通 im:message:send_as_bot，可用范围覆盖接收者；
-//   - identity_app_id 为同企业的身份（登录）应用，员工点开卡片后按它换票；
+//   - 推送应用已开通网页应用（H5 可信域名、重定向 URL）与「获取用户 user ID」权限，并在
+//     linapro-employee-core 的 lark_apps 中登记为免登应用：卡片 appId 与链接 larkAppId 都是它自己；
 //   - user_id 为该企业下一名真实成员的 user_id（该成员会收到一张卡片）；
 //   - 卡片模板已在飞书卡片搭建工具发布、授权给该推送应用，且声明变量 name 与 dynamic_evaluation_url。
 //
@@ -36,7 +37,6 @@ import (
 var (
 	smokePushAppID     = flag.String("lark_push_app_id", "", "真机冒烟用推送应用 app_id")
 	smokePushAppSecret = flag.String("lark_push_app_secret", "", "真机冒烟用推送应用 app_secret")
-	smokeIdentityAppID = flag.String("lark_identity_app_id", "", "同企业身份应用 app_id（写入链接 larkAppId）")
 	smokeUserID        = flag.String("lark_user_id", "", "真机冒烟接收者 user_id（须属于该企业）")
 	smokeTplID         = flag.String("lark_card_template_id", "", "真机冒烟用飞书卡片模板 ID")
 	smokeTplVer        = flag.String("lark_card_template_version", "", "真机冒烟用飞书卡片模板版本名（可空）")
@@ -46,14 +46,14 @@ var (
 // TestLarkimSmokeSendCard 用推送应用凭据真发一张 360 测评模板卡片到指定 user_id，
 // 断言返回非空 message_id（飞书 IM 接口成功投递的标志）。
 //
-// 卡片内容经生产同一 buildCard 构造（模板选取、身份应用 larkAppId、AppLink 包装），
+// 卡片内容经生产同一 buildCard 构造（模板选取、推送应用自身 larkAppId、AppLink 包装），
 // 发送与 linapro-lark-push 一致：推送应用凭据 + user_id。失败原因（权限缺失、可用范围
 // 不含接收者、模板未授权给推送应用 / 变量不匹配、限流等）会由 larkim 返回带
 // req_id/code/msg 的 gerror。
 func TestLarkimSmokeSendCard(t *testing.T) {
-	if *smokePushAppID == "" || *smokePushAppSecret == "" || *smokeIdentityAppID == "" ||
+	if *smokePushAppID == "" || *smokePushAppSecret == "" ||
 		*smokeUserID == "" || *smokeTplID == "" || *smokeTodoURL == "" {
-		t.Skip("真机冒烟需 -lark_push_app_id/-lark_push_app_secret/-lark_identity_app_id/-lark_user_id/-lark_card_template_id/-todo_h5_url，未提供则跳过")
+		t.Skip("真机冒烟需 -lark_push_app_id/-lark_push_app_secret/-lark_user_id/-lark_card_template_id/-todo_h5_url，未提供则跳过")
 	}
 	card := cardTemplate{
 		todoURL: *smokeTodoURL,
@@ -61,7 +61,7 @@ func TestLarkimSmokeSendCard(t *testing.T) {
 			*smokePushAppID: {templateID: *smokeTplID, versionName: *smokeTplVer},
 		},
 	}
-	app := larkpushcap.PushApp{AppID: *smokePushAppID, IdentityAppID: *smokeIdentityAppID}
+	app := larkpushcap.PushApp{AppID: *smokePushAppID}
 	cardJSON, err := buildCard(card, app, "冒烟测试")
 	if err != nil {
 		t.Fatalf("构造卡片失败: %v", err)

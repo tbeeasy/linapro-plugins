@@ -187,6 +187,12 @@
           "too": {
             "many": "单次最多新增 {max} 条评价关系"
           }
+        },
+        "evaluator": {
+          "role": {
+            "conflict": "被评估人「{evaluatee}」的评价者「{evaluator}」同时出现在多个角色中（{roles}），同一评价者对同一被评估人只能属于一个角色，未提交任何评价关系"
+          },
+          "duplicate": "被评估人「{evaluatee}」的角色「{role}」下评价者「{evaluator}」重复，未提交任何评价关系"
         }
       },
       "evaluatee": {

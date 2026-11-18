@@ -12,12 +12,21 @@ import (
 
 // exportBundle 是一次导出所需的全部数据（直读 live 结构，无快照）。
 type exportBundle struct {
-	dimensions  []*dimensionBundle
-	submissions []*entitymodel.Submission                 // 只含已提交
-	relations   map[int64]*entitymodel.Relation           // relation_id → relation
-	roleNames   map[int64]string                          // role_id → name
-	evalNames   map[int64]string                          // evaluatee_id → 员工姓名
-	answers     map[int64]map[int64][]*entitymodel.Answer // submission_id → question_id → answers
+	dimensions     []*dimensionBundle
+	submissions    []*entitymodel.Submission                 // 只含已提交
+	relations      map[int64]*entitymodel.Relation           // relation_id → relation
+	roleNames      map[int64]string                          // role_id → name
+	evalInfos      map[int64]*evaluateeInfo                  // evaluatee_id → 被评估人姓名/职务/部门/项目
+	evaluatorNames map[int64]string                          // evaluator_emp_id → 评价者姓名
+	answers        map[int64]map[int64][]*entitymodel.Answer // submission_id → question_id → answers
+}
+
+// evaluateeInfo 是被评估人在导出前导列中的展示信息（姓名 + 问卷级档案字段）。
+type evaluateeInfo struct {
+	name        string
+	jobTitle    string
+	department  string
+	workProject string
 }
 
 // dimensionBundle 是维度 + 其下题目。
@@ -141,19 +150,21 @@ func (s *serviceImpl) loadExportBundle(ctx context.Context, questionnaireID int6
 		return nil, err
 	}
 
-	// 被评估人姓名映射（evaluatee.id → 员工姓名）。
-	evalNames, err := s.loadEvaluateeNames(ctx, questionnaireID, rels)
+	// 被评估人信息（evaluatee.id → 姓名/职务/部门/项目）与评价人姓名映射。
+	// 两者共用一次 empcap 批量查询，避免逐行取姓名。
+	evalInfos, evaluatorNames, err := s.loadEvaluateeInfos(ctx, rels)
 	if err != nil {
 		return nil, err
 	}
 
 	return &exportBundle{
-		dimensions:  dimBundles,
-		submissions: subs,
-		relations:   rels,
-		roleNames:   roleNames,
-		evalNames:   evalNames,
-		answers:     answersBySub,
+		dimensions:     dimBundles,
+		submissions:    subs,
+		relations:      rels,
+		roleNames:      roleNames,
+		evalInfos:      evalInfos,
+		evaluatorNames: evaluatorNames,
+		answers:        answersBySub,
 	}, nil
 }
 
@@ -232,14 +243,18 @@ func (s *serviceImpl) loadRoleNames(ctx context.Context, questionnaireID int64, 
 	return out, nil
 }
 
-// loadEvaluateeNames 装载 evaluatee.id → 员工姓名 映射。
-func (s *serviceImpl) loadEvaluateeNames(ctx context.Context, questionnaireID int64, rels map[int64]*entitymodel.Relation) (map[int64]string, error) {
+// loadEvaluateeInfos 装载被评估人展示信息与评价人姓名。
+// 返回 evaluatee.id → 被评估人信息、evaluator_emp_id → 评价者姓名；被评估人姓名与评价者姓名
+// 走同一次 empcap 批量查询，评价行数增长不增加查询次数。
+func (s *serviceImpl) loadEvaluateeInfos(ctx context.Context, rels map[int64]*entitymodel.Relation) (map[int64]*evaluateeInfo, map[int64]string, error) {
 	evalIDSet := make(map[int64]struct{})
+	evaluatorEmpIDs := make(map[int64]struct{})
 	for _, r := range rels {
 		evalIDSet[r.EvaluateeId] = struct{}{}
+		evaluatorEmpIDs[r.EvaluatorEmpId] = struct{}{}
 	}
 	if len(evalIDSet) == 0 {
-		return map[int64]string{}, nil
+		return map[int64]*evaluateeInfo{}, map[int64]string{}, nil
 	}
 	evalIDs := make([]int64, 0, len(evalIDSet))
 	for id := range evalIDSet {
@@ -248,19 +263,32 @@ func (s *serviceImpl) loadEvaluateeNames(ctx context.Context, questionnaireID in
 	var ees []*entitymodel.Evaluatee
 	if err := dao.Evaluatee.Ctx(ctx).
 		WhereIn(dao.Evaluatee.Columns().Id, evalIDs).Scan(&ees); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	// evaluatee.id → emp_id，再批量取姓名（一次查询，无 N+1）。
-	empIDSet := make(map[int64]struct{}, len(ees))
+	// 被评估人与评价者的 EmpID 合并后一次批量取姓名。
+	empIDSet := make(map[int64]struct{}, len(ees)+len(evaluatorEmpIDs))
+	for id := range evaluatorEmpIDs {
+		empIDSet[id] = struct{}{}
+	}
 	for _, e := range ees {
 		empIDSet[e.EvaluateeEmpId] = struct{}{}
 	}
 	empNames := s.batchEmployeeNames(ctx, empIDSet)
-	out := make(map[int64]string, len(ees))
+
+	infos := make(map[int64]*evaluateeInfo, len(ees))
 	for _, e := range ees {
-		out[e.Id] = empNames[e.EvaluateeEmpId]
+		infos[e.Id] = &evaluateeInfo{
+			name:        empNames[e.EvaluateeEmpId],
+			jobTitle:    e.JobTitle,
+			department:  e.Department,
+			workProject: e.WorkProject,
+		}
 	}
-	return out, nil
+	evaluatorNames := make(map[int64]string, len(evaluatorEmpIDs))
+	for id := range evaluatorEmpIDs {
+		evaluatorNames[id] = empNames[id]
+	}
+	return infos, evaluatorNames, nil
 }
 
 // batchEmployeeNames 经 empcap 批量取 EmpID → 姓名（一次查询，无 N+1）。

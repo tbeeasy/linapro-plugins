@@ -92,4 +92,80 @@ test.describe('TC-2 360 测评项目列表与建项目抽屉', () => {
       await api.dispose();
     }
   });
+
+  // FB-3：问卷列表行内操作收纳为单个「更多操作」下拉（菜单项不带颜色），并新增「评价人数」列。
+  // 业务结果落在：新列表头与取值（无评价关系时为 0，去重口径由后端集成测试覆盖）、
+  // 下拉内 6 项操作为译文且无危险色、经下拉「重命名」后问卷标题在接口与列表中均已变更。
+  test('TC-2b: 项目详情问卷列表显示评价人数列，行操作收纳在「更多操作」下拉且可用', async ({
+    adminPage,
+  }) => {
+    const api = await newAdminApi(adminStorageStatePath);
+    const page = new Eval360Page(adminPage);
+    const stamp = Date.now();
+    const projectName = `E2E 问卷列表-${stamp}`;
+    const title = `列表问卷-${stamp}`;
+    const renamed = `列表问卷改名-${stamp}`;
+    let projectId = 0;
+
+    try {
+      const created = await api.post(evalApiPath('project'), {
+        data: { name: projectName, description: 'E2E' },
+      });
+      expect(created.ok()).toBeTruthy();
+      projectId = (await created.json()).data.id as number;
+      const questionnaire = await api.post(evalApiPath('questionnaire'), {
+        data: { projectId, title },
+      });
+      expect(questionnaire.ok()).toBeTruthy();
+
+      await page.goto();
+      await page.openProject(projectName);
+
+      // 新列：表头为译文，接口与界面一致（尚无评价关系 → 0）。
+      const pageResp = await api.get(evalApiPath('questionnaire/page'), {
+        params: { projectId, pageNum: 1, pageSize: 10 },
+      });
+      expect(pageResp.ok()).toBeTruthy();
+      const items: Array<{ evaluatorCount: number; title: string }> = (await pageResp.json()).data
+        .items;
+      expect(items.find((item) => item.title === title)?.evaluatorCount).toBe(0);
+      await expect(await page.questionnaireCell(title, '评价人数')).toHaveText('0');
+
+      // 操作列只剩一个无主色/危险色的「更多操作」按钮。
+      const more = await page.questionnaireMoreButton(title);
+      await expect(more).toHaveText(/更多操作/);
+      await expect(more).not.toHaveClass(/ant-btn-primary|ant-btn-dangerous/);
+
+      // 下拉内 6 项操作均为译文，且没有危险色菜单项。
+      const menu = await page.openQuestionnaireMoreMenu(title);
+      await expect(menu.locator('.ant-dropdown-menu-item')).toHaveText([
+        '评测问卷',
+        '评价关系',
+        '重命名',
+        '发布',
+        '复制问卷',
+        '删除',
+      ]);
+      await expect(menu.locator('.ant-dropdown-menu-item-danger')).toHaveCount(0);
+
+      // 经下拉「重命名」改名：接口与列表都读到新标题。
+      await menu.getByText('重命名', { exact: true }).click();
+      const dialog = adminPage.locator('.ant-modal').filter({ hasText: '重命名问卷' });
+      await expect(dialog).toBeVisible();
+      await dialog.locator('input').fill(renamed);
+      await dialog.getByRole('button', { name: /确\s*定/ }).click();
+      await expect(dialog).toBeHidden();
+      await expect(page.questionnaireRow(renamed)).toBeVisible();
+      const afterResp = await api.get(evalApiPath('questionnaire/page'), {
+        params: { projectId, pageNum: 1, pageSize: 10 },
+      });
+      const after: Array<{ title: string }> = (await afterResp.json()).data.items;
+      expect(after.map((item) => item.title)).toEqual([renamed]);
+    } finally {
+      if (projectId) {
+        await api.delete(evalApiPath(`project/${projectId}`));
+      }
+      await api.dispose();
+    }
+  });
 });

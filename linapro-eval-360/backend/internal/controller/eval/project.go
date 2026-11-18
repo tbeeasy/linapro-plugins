@@ -140,7 +140,8 @@ func toProjectDetailDTO(d *psvc.ProjectDetail) *v1.ProjectDetail {
 	for _, c := range d.Questionnaires {
 		cards = append(cards, &v1.QuestionnaireCard{
 			Id: c.Id, Title: c.Title, Published: c.Published, Sort: c.Sort,
-			EvaluateeCount: c.EvaluateeCount, Completed: c.Completed, Expected: c.Expected,
+			EvaluateeCount: c.EvaluateeCount, EvaluatorCount: c.EvaluatorCount,
+			Completed: c.Completed, Expected: c.Expected,
 			CreatedAt: timePtrToMillis(c.CreatedAt),
 		})
 	}

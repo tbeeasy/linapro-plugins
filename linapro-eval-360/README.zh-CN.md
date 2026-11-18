@@ -38,10 +38,13 @@
   - **所用时间**：前端计时（作答页渲染起、提交成功止、每次重开重置、无后台暂停），
     `duration_seconds` 后端原样存。
 - **飞书推送** —— 一评价者一张飞书**模板卡片**（模板变量`name`=评价者姓名、
-  `dynamic_evaluation_url`=追加`larkAppId=<该企业的身份应用>`的「我的评估」H5，不深链）。
-  链接经飞书 AppLink（`applink.feishu.cn/client/web_url/open?mode=window`）包装，在飞书内置浏览器
-  独立窗口打开，免登依赖飞书登录态（需飞书 7.5+）。员工端登录页据该`larkAppId`选用对应企业的
-  身份应用换票。下文卡片配置缺失时一键发送与单份发布均拒绝发布。投递经
+  `dynamic_evaluation_url`=追加`larkAppId=<该推送应用自身的 app_id>`的「我的评估」H5，不深链）。
+  链接固定经飞书 AppLink
+  `applink.feishu.cn/client/web_app/open`（不传`mode`，目标链接放在`lk_target_url`）包装，落在飞书导航栏
+  标签页、切会话不销毁，其`appId`与链接内`larkAppId`是**同一个推送应用**（发卡的「360测评助手」）、按企业生成，
+  卡片不会带上其他企业的应用。员工端在飞书内经 H5 JSAPI `tt.requestAuthCode`（使用该`larkAppId`）原地免登，
+  不再整页跳转 OAuth；该推送应用在`linapro-employee-core.lark_apps`中登记为免登应用，登录经本企业身份应用
+  查员工，身份应用本身不被 360 占用。下文卡片配置缺失时一键发送与单份发布均拒绝发布。投递经
   **`linapro-lark-push`**：本插件只交出评价者工号与卡片构造函数，寻址（工号 → 企业级 `user_id`）、
   推送应用凭据与跨企业扇出都由 lark-push 负责，本插件不读任何飞书应用凭据。任一企业投递成功即视为
   已触达。发布按问卷判定：某份问卷的待评评价者全部送达，这份问卷才发布。先对全部评价者干跑寻址一次
@@ -82,9 +85,14 @@
 README；该分组未配置、或其中任一条目凭据为空（lark-push 判定该分组配置非法）都会拦截发布。
 其它插件的分组与本插件互不影响。
 
-各企业**身份应用**（`linapro-employee-core.lark_apps`）的重定向 URL 白名单须包含不带参数的员工登录页地址，如
-`https://host/admin/#/eval-360/emp/login`（hash 路由）或
-`https://host/admin/eval-360/emp/login`（history 路由）。
+卡片固定以飞书网页应用形态打开，`appId`取发卡的推送应用本身，故本分组的**每个推送应用**都须在飞书后台
+开通网页应用能力（应用主页 + H5 可信域名）与「获取用户 user ID」权限，并在`linapro-employee-core.lark_apps`
+中登记为免登应用（`identity_app_id`=本企业身份应用），否则该企业的卡片打不开或免登失败。
+
+员工端免登使用飞书 H5 JSAPI `tt.requestAuthCode`，它要求调用页面地址（不含`?`与`#`之后部分）登记在
+各企业**推送应用**的「安全设置 → 重定向 URL」中，否则报错 10236。
+生产 hash 路由下即工作台 base，如`https://host/admin/`；页面域名还须是该应用的 H5 可信域名。
+在飞书以外打开时员工端只提示「请在飞书中打开」，不发起任何授权。
 
 ## 认证 / 多租户
 

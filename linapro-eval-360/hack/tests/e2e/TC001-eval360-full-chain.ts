@@ -277,6 +277,42 @@ test.describe('TC-1 360 测评全链路（建卷→导入→发布→作答→�
       await expect(await page.roleCell(evaluatee!.name, '同事')).toContainText(
         `${peerB!.name}(${peerB!.employeeNo})`,
       );
+
+      // FB-5：同一被评估人下，同一评价者只能属于一个角色且不得重复——违反时整次不提交、弹窗保持打开、明细表不变。
+      // ① 编辑弹窗在「同事」格再录入已在该格的 peerA → 同角色重复。
+      await page.openRoleEdit(evaluatee!.name, '同事');
+      const dupEditDialog = page.relationDialog();
+      await dupEditDialog.getByTestId('eval360-edit-add-row').click();
+      await dupEditDialog.getByTestId('eval360-edit-evaluator-name').last().fill(peerA!.name);
+      const dupEditResponse = adminPage.waitForResponse(
+        (res) =>
+          /\/relation$/.test(new URL(res.url()).pathname) && res.request().method() === 'POST',
+      );
+      await dupEditDialog.getByRole('button', { name: /确\s*定|确\s*认|OK/iu }).click();
+      expect((await (await dupEditResponse).json()).code).not.toBe(0);
+      const dupEditToast = adminPage.locator('.ant-message-notice:visible');
+      await expect(dupEditToast).toContainText(
+        `被评估人「${evaluatee!.name}」的角色「同事」下评价者「${peerA!.name}」重复，未提交任何评价关系`,
+      );
+      await expect(dupEditDialog).toBeVisible();
+      await dupEditDialog.getByRole('button', { name: /取\s*消|Cancel/iu }).click();
+      await expect(dupEditDialog).toBeHidden();
+      // ② 「新增评价关系」把 peerA 录入同一被评估人的「管理员」→ 跨角色。
+      const crossRoleResponse = adminPage.waitForResponse(
+        (res) =>
+          /\/relation$/.test(new URL(res.url()).pathname) && res.request().method() === 'POST',
+      );
+      const crossRoleDialog = await page.submitBatchAdd(evaluatee!.name, peerA!.name, '管理员');
+      expect((await (await crossRoleResponse).json()).code).not.toBe(0);
+      const crossRoleToast = adminPage.locator('.ant-message-notice:visible');
+      await expect(crossRoleToast).toContainText(
+        `被评估人「${evaluatee!.name}」的评价者「${peerA!.name}」同时出现在多个角色中（同事、管理员）`,
+      );
+      await expect(crossRoleDialog).toBeVisible();
+      await crossRoleDialog.getByRole('button', { name: /取\s*消|Cancel/iu }).click();
+      await expect(crossRoleDialog).toBeHidden();
+      await expect(await page.roleCell(evaluatee!.name, '管理员')).not.toContainText(peerA!.name);
+      // 「同事」格仍只有 peerA、peerB 两人：由紧随其后的 FB-14 断言（标签数 = 2）一并证明重复未写入。
       // FB-14 回归：该单元格已有 3 名评价人，列宽（220）不足以容纳「姓名(工号)」时，
       // 必须保持一人一行并由单元格内横向滚动兜底，而不是把单条标签折成多行。
       await page.expectEvaluatorLabelsSingleLine(evaluatee!.name, '同事', [
@@ -361,14 +397,15 @@ test.describe('TC-1 360 测评全链路（建卷→导入→发布→作答→�
           required: 1,
           sort: 2,
           matrixColumns: [
-            // FB-26：首列允许附评语（非必填、无预设 → 员工端为自由输入的多行文本框），
+            // FB-26：首列允许附评语（无预设 → 员工端为自由输入的多行文本框），
             // 用于覆盖「评语随评价项作答保存、并按【】并入导出」的整条链路。
+            // FB-4：该列勾选「必填」，用于覆盖「必填评语未填不得翻页」。
             {
               label: '优秀',
               score: '5',
               sort: 1,
               allowComment: 1,
-              commentRequired: 0,
+              commentRequired: 1,
               commentPlaceholder: '请举例说明',
             },
             { label: '良好', score: '4', sort: 2 },
@@ -401,8 +438,16 @@ test.describe('TC-1 360 测评全链路（建卷→导入→发布→作答→�
       const [evaluatee, evaluateeB, evaluator] = await pickActiveEmployees(api, 3);
 
       // Excel 全量导入两条评价关系（真实的角色生成路径）。
+      // FB-6：被评估人 A 带职务/部门/项目，用于断言导出档案三列确有取值（B 不带，断言留空）。
       const workbook = buildRelationWorkbook([
-        { evaluatee: evaluatee!, evaluator: evaluator!, role: '管理员' },
+        {
+          evaluatee: evaluatee!,
+          evaluator: evaluator!,
+          role: '管理员',
+          jobTitle: '销售总监',
+          department: '华东销售部',
+          workProject: '星火项目',
+        },
         { evaluatee: evaluateeB!, evaluator: evaluator!, role: '管理员' },
       ]);
       const fileBuffer = readFileSync(workbook);
@@ -580,6 +625,39 @@ test.describe('TC-1 360 测评全链路（建卷→导入→发布→作答→�
       await nextBtn.click();
       await expect(questionIndex).toHaveText('第 2 / 3 题');
 
+      // FB-7：作答本地暂存——刷新后停在第 2 题，回到第 1 题时选项与评语恢复。
+      // 先确认防抖写入已落到 localStorage，再刷新。
+      await expect
+        .poll(() =>
+          empPage.evaluate(() =>
+            Object.keys(localStorage).some((k) =>
+              k.startsWith('linapro:eval360:answer-draft:'),
+            ),
+          ),
+        )
+        .toBe(true);
+      await empPage.reload({ waitUntil: 'domcontentloaded' });
+      await expect(questionIndex).toHaveText('第 2 / 3 题');
+      await empPage.getByTestId('eval360-emp-prev').click();
+      await expect(questionIndex).toHaveText('第 1 / 3 题');
+      await expect(
+        gridRow('单选题', evaluatee!.name)
+          .getByTestId('eval360-emp-choice-cell')
+          .nth(0)
+          .locator('input'),
+      ).toBeChecked();
+      await expect(
+        gridRow('单选题', evaluatee!.name).getByTestId('eval360-emp-comment'),
+      ).toHaveValue('配合度高');
+      await expect(
+        gridRow('单选题', evaluateeB!.name)
+          .getByTestId('eval360-emp-choice-cell')
+          .nth(2)
+          .locator('input'),
+      ).toBeChecked();
+      await nextBtn.click();
+      await expect(questionIndex).toHaveText('第 2 / 3 题');
+
       // FB-19：员工端矩阵分值行同样不显示 0 分（列序：优秀 5 / 良好 4 / 无法评价 0）。
       await expect(
         questionBlock('矩阵题').getByTestId('eval360-emp-matrix-score'),
@@ -587,6 +665,8 @@ test.describe('TC-1 360 测评全链路（建卷→导入→发布→作答→�
 
       // 第 2 题 矩阵：行=被评估人，A→优秀（附评语），B→无法评价。
       const matrixRowA = gridRow('矩阵题', evaluatee!.name);
+      // FB-4：上一题的「下一题」已翻到本题，此处按钮反映当前题是否答完。
+      // 必答题选了必填评语的列但评语为空 → 该题仍视为未答完。
       // FB-26：未选列前不出现评语入口；选中「优秀」后单选钮旁出现评语图标，评语框以浮层自动弹出
       // （浮层 teleport 到 body，故从页面级查询），并以上配置的提示语作为 placeholder。
       await expect(matrixRowA.getByTestId('eval360-emp-matrix-comment-toggle')).toHaveCount(0);
@@ -595,7 +675,9 @@ test.describe('TC-1 360 测评全链路（建卷→导入→发布→作答→�
       const matrixComment = empPage.getByTestId('eval360-emp-matrix-comment');
       await expect(matrixComment).toBeVisible();
       await expect(matrixComment).toHaveAttribute('placeholder', '请举例说明');
+      await expect(nextBtn).toBeDisabled();
       await matrixComment.fill('带队打赢了硬仗');
+      await expect(nextBtn).toBeEnabled();
       // 点浮层外收起后图标标蓝（已填评语），再去选 B 行。
       await empPage.getByTestId('eval360-emp-question-index').click();
       await expect(matrixComment).toBeHidden();
@@ -646,14 +728,19 @@ test.describe('TC-1 360 测评全链路（建卷→导入→发布→作答→�
       await page.openQuestionnaire('管理层 360 测评表');
       await page.openTab('报告');
 
-      // FB-23：两表均不输出「评价者」列，前导列收窄为 5 列。
+      // FB-6：两表前导列一致，共 9 列；「被评价对象」更名为「被评价人」，
+      // 其后新增评价人与被评估人职务/部门/项目四列。
       const answerSheet = readXlsxSheet(await page.exportByAnswer());
       expect(answerSheet.header).toEqual([
         '序号',
         '提交时间',
         '所用时间',
+        '评价人',
         '关系角色',
-        '被评价对象',
+        '被评价人',
+        '被评估人职务',
+        '被评估人部门',
+        '项目',
         '单选题',
         '矩阵题',
         '一句话评价',
@@ -663,16 +750,26 @@ test.describe('TC-1 360 测评全链路（建卷→导入→发布→作答→�
       const answerRowOf = (name: string) =>
         answerSheet.rows
           .map((r) => rowByHeader(answerSheet, r))
-          .find((r) => r['被评价对象'] === name)!;
+          .find((r) => r['被评价人'] === name)!;
       const answerA = answerRowOf(evaluatee!.name);
       expect(answerA['关系角色']).toBe('管理员');
-      expect(answerA['评价者']).toBeUndefined();
+      // FB-6：评价人列为该行评价者姓名，档案三列取导入时录入的被评估人职务/部门/项目。
+      expect(answerA['评价人']).toBe(evaluator!.name);
+      expect(answerA['被评估人职务']).toBe('销售总监');
+      expect(answerA['被评估人部门']).toBe('华东销售部');
+      expect(answerA['项目']).toBe('星火项目');
+      // 旧列名「被评价对象」已更名为「被评价人」。
+      expect(answerA['被评价对象']).toBeUndefined();
       // 选项级评语并入该题单元格、以【】包裹；矩阵评价项评语同一口径（FB-26）。
       expect(answerA['单选题']).toBe('优秀【配合度高】');
       expect(answerA['矩阵题']).toBe('优秀【带队打赢了硬仗】');
       expect(answerA['一句话评价']).toBe('推进有力');
       expect(answerA['改进建议']).toBe('');
       const answerB = answerRowOf(evaluateeB!.name);
+      // 未录入职务/部门/项目的被评估人该三列留空，仍保留列位。
+      expect(answerB['被评估人职务']).toBe('');
+      expect(answerB['被评估人部门']).toBe('');
+      expect(answerB['项目']).toBe('');
       expect(answerB['单选题']).toBe('无法评价');
       expect(answerB['矩阵题']).toBe('无法评价');
       expect(answerB['一句话评价']).toBe('');
@@ -682,17 +779,22 @@ test.describe('TC-1 360 测评全链路（建卷→导入→发布→作答→�
         '序号',
         '提交时间',
         '所用时间',
+        '评价人',
         '关系角色',
-        '被评价对象',
+        '被评价人',
+        '被评估人职务',
+        '被评估人部门',
+        '项目',
         '单选题',
         '矩阵题',
       ]);
       expect(scoreSheet.rows).toHaveLength(2);
       const scoreRowIndexOf = (name: string) =>
-        scoreSheet.rows.findIndex((r) => rowByHeader(scoreSheet, r)['被评价对象'] === name);
+        scoreSheet.rows.findIndex((r) => rowByHeader(scoreSheet, r)['被评价人'] === name);
       const scoreRowOf = (name: string) =>
         rowByHeader(scoreSheet, scoreSheet.rows[scoreRowIndexOf(name)]!);
-      expect(scoreRowOf(evaluatee!.name)['评价者']).toBeUndefined();
+      // FB-6：按得分表与按答案表前导列骨架一致，评价人同样落姓名。
+      expect(scoreRowOf(evaluatee!.name)['评价人']).toBe(evaluator!.name);
       // FB-24：分值写数字单元格（Excel 可直接求和/求均值），不是文本。
       expect(scoreRowOf(evaluatee!.name)['单选题']).toBe('5');
       expect(scoreRowOf(evaluatee!.name)['矩阵题']).toBe('5');

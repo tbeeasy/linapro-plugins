@@ -56,6 +56,20 @@ var (
 	CodeRelationItemsEmpty = bizerr.MustDefine(
 		"EVAL360_RELATION_ITEMS_EMPTY", "Please fill in at least one evaluation relation", gcode.CodeInvalidParameter,
 	)
+	// CodeRelationEvaluatorRoleConflict 同一被评估人下，同一评价者出现在多个角色中
+	// （{evaluatee} 被评估人姓名、{evaluator} 评价者姓名、{roles} 涉及的角色清单）。
+	CodeRelationEvaluatorRoleConflict = bizerr.MustDefine(
+		"EVAL360_RELATION_EVALUATOR_ROLE_CONFLICT",
+		"Evaluator \"{evaluator}\" of evaluatee \"{evaluatee}\" appears in more than one role ({roles}); an evaluator can only belong to one role per evaluatee, so nothing was submitted",
+		gcode.CodeInvalidParameter,
+	)
+	// CodeRelationEvaluatorDuplicate 同一被评估人的同一角色下，同一评价者重复出现
+	// （{evaluatee} 被评估人姓名、{evaluator} 评价者姓名、{role} 角色名）。
+	CodeRelationEvaluatorDuplicate = bizerr.MustDefine(
+		"EVAL360_RELATION_EVALUATOR_DUPLICATE",
+		"Evaluator \"{evaluator}\" is listed more than once under role \"{role}\" of evaluatee \"{evaluatee}\", so nothing was submitted",
+		gcode.CodeInvalidParameter,
+	)
 	// CodeImportEmpty 模板无有效数据行。
 	CodeImportEmpty = bizerr.MustDefine(
 		"EVAL360_IMPORT_EMPTY", "导入文件无有效数据行", gcode.CodeInvalidParameter,

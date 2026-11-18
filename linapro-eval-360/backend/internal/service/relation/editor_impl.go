@@ -191,7 +191,8 @@ func toEmployeeOption(emp *empcap.Employee) *EmployeeOption {
 //
 // 先把全部条目的被评估人、评价者姓名一次解析（规则见 relation_resolve.go），收集**全部**在职重名
 // 与找不到的姓名：任一非空即整体拒绝、不写入任何数据，错误参数 names 列出这些姓名（优先报重名）。
-// 全部解析通过后在单事务内写入：被评估人查已有、没有才建（职务/部门/项目按条目顺序合并，后出现的非空值
+// 再校验同一被评估人下评价者不重复、不跨角色（本批与库中已有关系合并判断），违反即整体拒绝。
+// 全部校验通过后在单事务内写入：被评估人查已有、没有才建（职务/部门/项目按条目顺序合并，后出现的非空值
 // 覆盖前值，再以「非空覆盖、空保留」写入既有被评估人）；角色查已有、没有才建；评价关系为纯 INSERT。
 func (s *serviceImpl) AddRelations(ctx context.Context, in AddRelationsInput) ([]int64, error) {
 	if len(in.Items) == 0 {
@@ -271,11 +272,18 @@ func (s *serviceImpl) AddRelations(ctx context.Context, in AddRelationsInput) ([
 
 	// 自评拦截，并按被评估人合并职务/部门/项目（后出现的非空值覆盖前值）。
 	profiles := make(map[int64]evaluateeProfile)
+	entries := make([]pairEntry, 0, len(items))
 	for _, it := range items {
 		eeID, erID := byName[it.evaluateeName].emp.EmpID, byName[it.evaluatorName].emp.EmpID
 		if eeID == erID {
 			return nil, bizerr.NewCode(CodeImportSelfEvaluate)
 		}
+		entries = append(entries, pairEntry{
+			pair:          evaluatorPair{evaluateeEmpID: eeID, evaluatorEmpID: erID},
+			evaluateeName: it.evaluateeName,
+			evaluatorName: it.evaluatorName,
+			roleName:      it.roleName,
+		})
 		merged := profiles[eeID]
 		if it.profile.JobTitle != "" {
 			merged.JobTitle = it.profile.JobTitle
@@ -287,6 +295,11 @@ func (s *serviceImpl) AddRelations(ctx context.Context, in AddRelationsInput) ([
 			merged.WorkProject = it.profile.WorkProject
 		}
 		profiles[eeID] = merged
+	}
+
+	// 同一被评估人下评价者不得重复、不得跨角色（本批 + 库中已有关系合并判断，见 relation_conflict.go）。
+	if err = s.checkAddConflicts(ctx, in.QuestionnaireID, entries); err != nil {
+		return nil, err
 	}
 
 	ids := make([]int64, 0, len(items))

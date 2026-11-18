@@ -187,6 +187,12 @@
           "too": {
             "many": "At most {max} evaluation relations can be added at once"
           }
+        },
+        "evaluator": {
+          "role": {
+            "conflict": "Evaluator \"{evaluator}\" of evaluatee \"{evaluatee}\" appears in more than one role ({roles}); an evaluator can only belong to one role per evaluatee, so nothing was submitted"
+          },
+          "duplicate": "Evaluator \"{evaluator}\" is listed more than once under role \"{role}\" of evaluatee \"{evaluatee}\", so nothing was submitted"
         }
       },
       "evaluatee": {

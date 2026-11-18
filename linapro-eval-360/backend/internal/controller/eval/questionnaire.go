@@ -27,7 +27,8 @@ func (c *ControllerV1) PageQuestionnaire(ctx context.Context, req *v1.PageQuesti
 	for _, it := range items {
 		cards = append(cards, &v1.QuestionnaireCard{
 			Id: it.Id, Title: it.Title, Published: it.Published, Sort: it.Sort,
-			EvaluateeCount: it.EvaluateeCount, Completed: it.Completed, Expected: it.Expected,
+			EvaluateeCount: it.EvaluateeCount, EvaluatorCount: it.EvaluatorCount,
+			Completed: it.Completed, Expected: it.Expected,
 			CreatedAt: timePtrToMillis(it.CreatedAt),
 		})
 	}
