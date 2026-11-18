@@ -32,9 +32,9 @@ moka-report-sync、eval-360）经 go.mod `replace` 指令导入。它**不是插
 ## 边界约束
 
 - 只做**出站**调用。MUST NOT 实现事件订阅或回调接收。
-- 依赖方向在库内（`larkim` → `larkhttp`、`larkbitable` → `larkhttp`）。MUST NOT
-  引入 `lina-core`。（`larkhttp` 在源码层 import 了 `lina-core/pkg/logger` 用于
-  429 退避日志，经 `go.work` 解析；其余子包不新增 `lina-core` 引用。）
+- 库内依赖方向为 `larkim` → `larkhttp`、`larkbitable` → `larkhttp`。
+- 允许引用 `lina-core/pkg` 的通用能力包（`logger`、`capability/*`）；MUST NOT
+  引用 `lina-core` 的业务 service；也 MUST NOT 让 `lina-core` 反向依赖 larksuite SDK。
 
 ## 消费方
 

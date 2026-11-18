@@ -8,10 +8,10 @@
 //
 // 边界约束：
 //   - 只做出站发送，MUST NOT 实现事件订阅或回调接收；
-//   - 依赖方向为 larkim → larkhttp（同库内），MUST NOT 引入 lina-core。
-//
-// 注：larkhttp 当前源码层 import 了 lina-core/pkg/logger（用于 429 退避日志），
-// 该 import 经 go.work 解析；larkim 自身不新增任何 lina-core 引用。
+//   - 库内依赖方向为 larkim → larkhttp；
+//   - 允许引用 lina-core/pkg 的通用能力包（logger、capability/*），
+//     MUST NOT 引用 lina-core 的业务 service；
+//   - MUST NOT 让 lina-core 反向依赖 larksuite SDK。
 package larkim
 
 import (

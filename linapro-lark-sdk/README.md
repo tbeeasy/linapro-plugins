@@ -43,11 +43,11 @@ hooks, and ships no SQL or menus.
 
 - Only **outbound** calls. The library MUST NOT implement event subscription or
   callback reception.
-- Dependency direction is intra-library (`larkim` → `larkhttp`,
-  `larkbitable` → `larkhttp`). The library MUST NOT import `lina-core`.
-  (`larkhttp` currently imports `lina-core/pkg/logger` for 429 backoff logging
-  at the source layer, resolved via `go.work`; the other sub-packages add no
-  `lina-core` references.)
+- Intra-library dependency direction is `larkim` → `larkhttp`,
+  `larkbitable` → `larkhttp`.
+- The library MAY import general-purpose packages under `lina-core/pkg`
+  (`logger`, `capability/*`). It MUST NOT import `lina-core` business services,
+  and `lina-core` MUST NOT depend on the larksuite SDK in reverse.
 
 ## Consumers
 
